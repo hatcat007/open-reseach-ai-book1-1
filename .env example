@@ -1,0 +1,8 @@
+EMBEDDING_CHUNK_OVERLAP=50
+
+# LM STUDIO
+LM_STUDIO_API_BASE="http://localhost:1234/v1" # Replace with your LM Studio server API base URL
+# LM_STUDIO_API_KEY= # Optional: if your LM Studio server uses an API key
+
+# HUGGING FACE
+# HF_API_KEY= # Your Hugging Face User Access Token (read access is often sufficient for inference)

@@ -1,0 +1,1 @@
+This page moved to: [https://www.open-notebook.ai/get-started.html](https://www.open-notebook.ai/get-started.html)

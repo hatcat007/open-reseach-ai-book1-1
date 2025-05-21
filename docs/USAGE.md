@@ -1,0 +1,2 @@
+This page moved to: [http://www.open-notebook.ai/features/basic-workflow.html](http://www.open-notebook.ai/features/basic-workflow.html)
+Also check: [http://www.open-notebook.ai/features.html](http://www.open-notebook.ai/features.html)
