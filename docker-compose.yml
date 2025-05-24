@@ -11,7 +11,8 @@ services:
       - ./surreal_data:/mydata
     environment:
       - SURREAL_EXPERIMENTAL_GRAPHQL=true
-    command: start --log info --user root --pass root rocksdb:/mydata/mydatabase.db
+    command: start --log info --user root --pass root rocksdb:/mydata
+
     pull_policy: always
     user: root
     profiles: [db_only, multi]
