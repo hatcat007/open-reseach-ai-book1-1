@@ -131,12 +131,19 @@ async def scrape_website(base_url: str, max_pages: int = 0) -> list[Document]:
     Returns:
         A list of Document objects, each containing the markdown content of a page.
     """
+    parsed_url = urlparse(base_url)
+    if not parsed_url.scheme:
+        base_url = f"https://{base_url}"
+        logger.info(f"No scheme in base_url, defaulting to HTTPS: {base_url}")
+
     logger.info(f"Starting website scrape for: {base_url}")
     sitemap_urls_to_try = [urljoin(base_url, "/sitemap.xml")]
     
-    robots_sitemap = await _fetch_sitemap_url_from_robots(base_url)
-    if robots_sitemap:
-        sitemap_urls_to_try.append(robots_sitemap) # Add it, could be an index or specific sitemap
+    robots_sitemap_path = await _fetch_sitemap_url_from_robots(base_url)
+    if robots_sitemap_path:
+        # Ensure the sitemap URL is absolute
+        robots_sitemap_url = urljoin(base_url, robots_sitemap_path) if robots_sitemap_path.startswith('/') else robots_sitemap_path
+        sitemap_urls_to_try.append(robots_sitemap_url)
 
     all_page_urls = set()
 

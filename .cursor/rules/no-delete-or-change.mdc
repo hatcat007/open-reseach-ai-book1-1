@@ -1,6 +1,6 @@
 ---
 description: 
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
-DO not delele or change code, only make code
+- DO not delele or change code, only make code

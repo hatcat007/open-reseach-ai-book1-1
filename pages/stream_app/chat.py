@@ -46,6 +46,9 @@ def build_context(notebook_id):
             item: Union[Note, Source] = ObjectModel.get(id)
         except NotFoundError:
             print(f"Warning: Context item {id} not found. Skipping.")
+            # Remove the invalid ID from context_config
+            if id in st.session_state[notebook_id]["context_config"]:
+                del st.session_state[notebook_id]["context_config"][id]
             continue
         except Exception as e:
             print(f"Warning: Error fetching context item {id}: {e}. Skipping.")
