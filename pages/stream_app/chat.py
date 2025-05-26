@@ -30,6 +30,7 @@ from .note import make_note_from_chat
 # todo: build a smarter, more robust context manager function
 def build_context(notebook_id):
     st.session_state[notebook_id]["context"] = dict(note=[], source=[])
+    ids_to_remove = [] # New list to store IDs for removal
 
     for id, status in st.session_state[notebook_id]["context_config"].items():
         if not id:
@@ -46,12 +47,12 @@ def build_context(notebook_id):
             item: Union[Note, Source] = ObjectModel.get(id)
         except NotFoundError:
             print(f"Warning: Context item {id} not found. Skipping.")
-            # Remove the invalid ID from context_config
-            if id in st.session_state[notebook_id]["context_config"]:
-                del st.session_state[notebook_id]["context_config"][id]
+            ids_to_remove.append(id) # Add to list instead of deleting here
             continue
         except Exception as e:
             print(f"Warning: Error fetching context item {id}: {e}. Skipping.")
+            # Optionally, decide if this error type should also lead to removal
+            # ids_to_remove.append(id)
             continue
 
         if "insights" in status:
@@ -62,6 +63,11 @@ def build_context(notebook_id):
             st.session_state[notebook_id]["context"][item_type] += [
                 item.get_context(context_size="long")
             ]
+    
+    # Remove invalid IDs after the loop
+    for id_to_remove in ids_to_remove:
+        if id_to_remove in st.session_state[notebook_id]["context_config"]:
+            del st.session_state[notebook_id]["context_config"][id_to_remove]
 
     return st.session_state[notebook_id]["context"]
 

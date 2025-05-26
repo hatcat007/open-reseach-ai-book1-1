@@ -1,6 +1,9 @@
 import streamlit as st
 from dotenv import load_dotenv
 
+# Call st.set_page_config() as the FIRST Streamlit command
+st.set_page_config(page_title="📒 Open Notebook", layout="wide", initial_sidebar_state="collapsed")
+
 from open_notebook.domain.base import ObjectModel
 from open_notebook.exceptions import NotFoundError
 from pages.components import (
@@ -12,6 +15,7 @@ from pages.components import (
 from pages.stream_app.utils import setup_page
 
 load_dotenv()
+# Pass the title to setup_page for other uses if needed, but page config is already set.
 setup_page("📒 Open Notebook", sidebar_state="collapsed")
 
 if "object_id" not in st.query_params:

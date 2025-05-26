@@ -58,6 +58,50 @@ class Crawl4AILoader:  # Adapted from BaseLoader
         finally:
             await crawler.close()
 
+async def get_content_from_url(url: str, browser_config: BrowserConfig = None) -> str:
+    """Fetches content from a single URL using Crawl4AILoader and returns its markdown.
+    
+    Args:
+        url (str): The URL to fetch content from.
+        browser_config (BrowserConfig, optional): Optional browser configuration.
+
+    Returns:
+        str: The markdown content of the page, or an empty string if an error occurs or no content.
+    """
+    parsed_url = urlparse(url)
+    if not parsed_url.scheme:
+        url = f"https://{url}"
+        logger.info(f"get_content_from_url: No scheme in URL, defaulting to HTTPS: {url}")
+
+    loader = Crawl4AILoader(url, browser_config=browser_config)
+    documents = await loader.aload() # aload returns a list of Documents
+    if documents and documents[0].page_content:
+        return documents[0].page_content
+    logger.warning(f"get_content_from_url: No content found for {url}")
+    return ""
+
+async def get_title_from_url(url: str, browser_config: BrowserConfig = None) -> str:
+    """Fetches title from a single URL using Crawl4AILoader.
+    
+    Args:
+        url (str): The URL to fetch title from.
+        browser_config (BrowserConfig, optional): Optional browser configuration.
+
+    Returns:
+        str: The title of the page, or an empty string if an error occurs or no title.
+    """
+    parsed_url = urlparse(url)
+    if not parsed_url.scheme:
+        url = f"https://{url}"
+        logger.info(f"get_title_from_url: No scheme in URL, defaulting to HTTPS: {url}")
+
+    loader = Crawl4AILoader(url, browser_config=browser_config)
+    documents = await loader.aload()
+    if documents and documents[0].metadata and documents[0].metadata.get("title"):
+        return documents[0].metadata["title"]
+    logger.warning(f"get_title_from_url: No title found for {url}")
+    return ""
+
 async def _fetch_xml_sitemap_urls(sitemap_url: str) -> list[str]:
     """Fetches and parses an XML sitemap, returning a list of URLs."""
     urls = []

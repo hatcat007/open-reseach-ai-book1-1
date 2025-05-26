@@ -5,7 +5,7 @@ import streamlit as st
 
 from open_notebook.config import CONFIG
 from open_notebook.domain.models import DefaultModels, Model, model_manager
-from open_notebook.models import MODEL_CLASS_MAP
+from open_notebook.models import MODEL_CLASS_MAP, ImageToTextModel
 from pages.components.model_selector import model_selector
 from pages.stream_app.utils import setup_page
 
@@ -24,6 +24,7 @@ model_types = [
     "embedding",
     "text_to_speech",
     "speech_to_text",
+    "image_to_text",
 ]
 
 provider_status["ollama"] = os.environ.get("OLLAMA_API_BASE") is not None
@@ -105,29 +106,29 @@ with model_tab:
         )
 
     # Filter model types based on provider availability in MODEL_CLASS_MAP
-    available_model_types = []
-    for model_type in model_types:
-        if model_type in MODEL_CLASS_MAP and provider in MODEL_CLASS_MAP[model_type]:
-            available_model_types.append(model_type)
+    available_model_types_for_provider = []
+    for mt in model_types:
+        if mt in MODEL_CLASS_MAP and provider in MODEL_CLASS_MAP[mt]:
+            available_model_types_for_provider.append(mt)
 
-    if not available_model_types:
+    if not available_model_types_for_provider:
         st.error(f"No compatible model types available for provider: {provider}")
     else:
-        model_type = st.selectbox(
+        selected_model_type = st.selectbox(
             "Model Type",
-            available_model_types,
+            available_model_types_for_provider,
             help="Use language for text generation models, text_to_speech for TTS models for generating podcasts, etc.",
         )
-        if model_type == "text_to_speech" and provider == "gemini":
-            model_name = "gemini-default"
+        if selected_model_type == "text_to_speech" and provider == "gemini":
+            model_name_input = "gemini-default"
             st.markdown("Gemini models are pre-configured. Using the default model.")
         else:
-            model_name = st.text_input(
+            model_name_input = st.text_input(
                 "Model Name", "", help="gpt-4o-mini, claude, gemini, llama3, etc"
             )
         if st.button("Save"):
-            model = Model(name=model_name, provider=provider, type=model_type)
-            model.save()
+            model_to_save = Model(name=model_name_input, provider=provider, type=selected_model_type)
+            model_to_save.save()
             st.success("Saved")
 
     st.divider()
@@ -144,24 +145,26 @@ with model_tab:
                     new_model.save()
                     st.rerun()
     st.subheader("Configured Models")
-    model_types_available = {
+    model_types_available_map = {
         # "vision": False,
         "language": False,
         "embedding": False,
         "text_to_speech": False,
         "speech_to_text": False,
+        "image_to_text": False,
     }
-    for model in all_models:
-        model_types_available[model.type] = True
+    for model_item in all_models:
+        if model_item.type in model_types_available_map:
+            model_types_available_map[model_item.type] = True
         with st.container(border=True):
-            st.markdown(f"{model.name} ({model.provider}, {model.type})")
-            if st.button("Delete", key=f"delete_{model.id}"):
-                model.delete()
+            st.markdown(f"{model_item.name} ({model_item.provider}, {model_item.type})")
+            if st.button("Delete", key=f"delete_{model_item.id}"):
+                model_item.delete()
                 st.rerun()
 
-    for model_type, available in model_types_available.items():
+    for mt, available in model_types_available_map.items():
         if not available:
-            st.warning(f"No models available for {model_type}")
+            st.warning(f"No models available for {mt}")
 
 with model_defaults_tab:
     # Prepare transcript_provider_models dictionary
@@ -319,18 +322,32 @@ with model_defaults_tab:
     # ---- End of Default Transcript Model Provider and Model ----
     st.divider()
     # Handle embedding model selection
-    selected_model = model_selector(
-        "Default Speech to Text Model",
+    selected_embedding_model = model_selector(
+        "Default Embedding Model",
         "default_embedding_model",
         selected_id=default_models.default_embedding_model,
-        help="This is the default model for embeddings (semantic search, etc)",
+        help="Used to generate embeddings for vector search.",
         model_type="embedding",
     )
-    if selected_model:
-        default_models.default_embedding_model = selected_model.id
+    if selected_embedding_model:
+        default_models.default_embedding_model = selected_embedding_model.id
     st.warning(
         "Caution: you cannot change the embedding model once there is embeddings or they will need to be regenerated"
     )
+    st.divider()
+
+    # Handle Image-to-Text model selection
+    selected_image_to_text_model = model_selector(
+        "Default Image-to-Text Model",
+        "default_image_to_text_model",
+        selected_id=default_models.default_image_to_text_model,
+        help="This model will be used for generating text descriptions from images.",
+        model_type="image_to_text",
+    )
+    if selected_image_to_text_model:
+        default_models.default_image_to_text_model = selected_image_to_text_model.id
+    st.caption("Select an Image-to-Text model (e.g., from Openrouter). Ensure it's configured in the 'Models' tab first.")
+    st.divider()
 
     for k, v in defs.items():
         if v:
@@ -347,4 +364,6 @@ with model_defaults_tab:
             
         default_models.patch(defs)
         model_manager.refresh_defaults()
-        st.success("Saved")
+        model_manager.clear_cache()
+        st.success("Default models saved!")
+        st.rerun()

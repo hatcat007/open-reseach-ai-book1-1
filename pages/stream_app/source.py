@@ -38,7 +38,7 @@ def add_source(notebook_id):
     max_pages_to_scrape = 0
 
     # Updated source types
-    source_type_options = ["Link", "Upload", "Text", "Scrape all website"]
+    source_type_options = ["Link", "Upload", "Text", "Scrape all website", "YouTube Link"]
     source_type = st.radio("Type", source_type_options)
     
     # This will hold the primary input for the graph (either content_state or scraped_documents)
@@ -62,6 +62,11 @@ def add_source(notebook_id):
         website_url_to_scrape = st.text_input("Website Base URL (e.g., https://www.example.com)")
         max_pages_to_scrape = st.number_input("Max pages to scrape (0 for all)", min_value=0, value=10, step=1, help="Set to 0 to try and scrape all pages found in the sitemap. Large websites can take a very long time and consume many resources.")
         # For this type, scraped_documents will be populated directly later.
+    elif source_type == "YouTube Link":
+        youtube_url_input = st.text_input("YouTube Video URL")
+        content_request_details["url"] = youtube_url_input # Use 'url' key
+        content_request_details["source_type"] = "youtube_link_initial" # Temporary type for routing
+        graph_input_payload["content_state"] = content_request_details
 
     transformations = Transformation.get_all()
     default_transformations = [t for t in transformations if t.apply_default]
@@ -114,7 +119,9 @@ def add_source(notebook_id):
                         return
                     status_ui.write(f"Successfully scraped {len(scraped_docs)} pages. Preparing to add to notebook.")
                     graph_input_payload["scraped_documents"] = scraped_docs
+                    # Ensure content_state is not present if scraped_documents is being used
                     graph_input_payload.pop("content_state", None)
+
 
                 # Common parameters for the graph invocation
                 graph_input_payload["notebook_id"] = notebook_id
@@ -160,28 +167,46 @@ def source_card(source, notebook_id):
     elif not source.asset or (not source.asset.url and not source.asset.file_path):
         icon = "✍️"
 
+    # Ensure session state structure for context_config exists
+    if notebook_id not in st.session_state:
+        st.session_state[notebook_id] = {}
+    if "context_config" not in st.session_state[notebook_id]:
+        st.session_state[notebook_id]["context_config"] = {}
+    
+    default_source_display_value = source_context_icons[0]  # Changed from 2 to 0 ("⛔ not in context")
+
+    # Get the current selection for this source from session_state
+    current_selection_value = st.session_state[notebook_id]["context_config"].get(source.id, default_source_display_value)
+    
+    try:
+        current_display_index = source_context_icons.index(current_selection_value)
+    except ValueError:
+        current_display_index = source_context_icons.index(default_source_display_value)
+        # If value was invalid, correct it in session_state and query_params
+        st.session_state[notebook_id]["context_config"][source.id] = default_source_display_value
+        st.query_params[f"ctx_source_{source.id}"] = default_source_display_value
+
+    def on_source_context_change():
+        new_value = st.session_state[f"source_select_{source.id}"]
+        st.session_state[notebook_id]["context_config"][source.id] = new_value
+        st.query_params[f"ctx_source_{source.id}"] = new_value
+
     with st.container(border=True):
         title = (source.title if source.title else "No Title").strip()
         st.markdown((f"{icon} **{title}**"))
-        context_state = st.selectbox(
+        st.selectbox(
             "Context",
             label_visibility="collapsed",
             options=source_context_icons,
-            index=1,
-            key=f"source_{source.id}_context_select",
+            index=current_display_index, 
+            key=f"source_select_{source.id}", # Unique key for selectbox widget
+            on_change=on_source_context_change
         )
         st.caption(
             f"Updated: {naturaltime(source.updated)}, **{len(source.insights)}** insights. Type: {source.asset.source_type if source.asset else 'text'}"
         )
         if st.button("Expand", icon="📝", key=f"expand_source_{source.id}"):
             source_panel_dialog(source.id, notebook_id)
-
-    # Ensure context_config for the notebook exists
-    if notebook_id not in st.session_state:
-        st.session_state[notebook_id] = {}
-    if "context_config" not in st.session_state[notebook_id]:
-        st.session_state[notebook_id]["context_config"] = {}
-    st.session_state[notebook_id]["context_config"][source.id] = context_state
 
 
 def source_list_item(source_id, score=None):

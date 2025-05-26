@@ -95,6 +95,21 @@ class Notebook(ObjectModel):
             logger.exception(e)
             raise DatabaseOperationError(e)
 
+    @property
+    def tasks(self) -> List["Task"]:
+        try:
+            # Assuming a 'task_for' edge from task to notebook
+            # and tasks are stored in a 'task' table
+            query_string = f"""
+            SELECT * FROM task WHERE notebook = {self.id} ORDER BY created DESC;
+            """
+            task_records = repo_query(query_string)
+            return [Task(**task_record) for task_record in task_records] if task_records else []
+        except Exception as e:
+            logger.error(f"Error fetching tasks for notebook {self.id}: {str(e)}")
+            logger.exception(e)
+            raise DatabaseOperationError(e)
+
 
 class Asset(BaseModel):
     file_path: Optional[str] = None
@@ -421,3 +436,27 @@ def vector_search(
         logger.error(f"Error performing vector search: {str(e)}")
         logger.exception(e)
         raise DatabaseOperationError(e)
+
+
+class Task(ObjectModel):
+    table_name: ClassVar[str] = "task"
+    notebook: str  # Storing notebook id directly as a string
+    description: str
+    status: Literal["todo", "in_progress", "completed"] = "todo"
+    due_date: Optional[datetime.datetime] = None
+    order: Optional[int] = None
+
+    @field_validator("description")
+    @classmethod
+    def description_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise InvalidInputError("Task description cannot be empty")
+        return v
+
+    def add_to_notebook(self, notebook_id: str) -> Any:
+        if not notebook_id:
+            raise InvalidInputError("Notebook ID must be provided")
+        # Instead of a generic relate, we are setting the notebook field directly
+        # and then saving. If you prefer an edge, this would need to change.
+        self.notebook = notebook_id
+        return self.save() # Assuming save() handles create/update

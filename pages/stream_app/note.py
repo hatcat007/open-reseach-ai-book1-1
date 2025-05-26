@@ -57,21 +57,45 @@ def note_card(note, notebook_id):
     else:
         icon = "🤖"
 
+    # Ensure session state structure for context_config exists
+    if notebook_id not in st.session_state:
+        st.session_state[notebook_id] = {}
+    if "context_config" not in st.session_state[notebook_id]:
+        st.session_state[notebook_id]["context_config"] = {}
+
+    default_note_display_value = note_context_icons[1]  # Changed from 0 to 1 ("🟢 full content")
+
+    # Get the current selection for this note from session_state, which should be populated from query_params on page load
+    current_selection_value = st.session_state[notebook_id]["context_config"].get(note.id, default_note_display_value)
+    
+    try:
+        current_display_index = note_context_icons.index(current_selection_value)
+    except ValueError:
+        current_display_index = note_context_icons.index(default_note_display_value)
+        # If value was invalid, correct it in session_state and query_params
+        st.session_state[notebook_id]["context_config"][note.id] = default_note_display_value
+        st.query_params[f"ctx_note_{note.id}"] = default_note_display_value
+
+    def on_note_context_change():
+        new_value = st.session_state[f"note_select_{note.id}"]
+        st.session_state[notebook_id]["context_config"][note.id] = new_value
+        st.query_params[f"ctx_note_{note.id}"] = new_value
+        # No st.rerun() needed here as st.query_params change triggers it.
+
     with st.container(border=True):
         st.markdown((f"{icon} **{note.title if note.title else 'No Title'}**"))
-        context_state = st.selectbox(
+        st.selectbox(
             "Context",
             label_visibility="collapsed",
             options=note_context_icons,
-            index=1,
-            key=f"note_{note.id}",
+            index=current_display_index,
+            key=f"note_select_{note.id}", # Unique key for selectbox widget
+            on_change=on_note_context_change
         )
         st.caption(f"Updated: {naturaltime(note.updated)}")
 
         if st.button("Expand", icon="📝", key=f"edit_note_{note.id}"):
             note_panel_dialog(notebook_id=notebook_id, note=note)
-
-    st.session_state[notebook_id]["context_config"][note.id] = context_state
 
 
 def note_list_item(note_id, score=None):

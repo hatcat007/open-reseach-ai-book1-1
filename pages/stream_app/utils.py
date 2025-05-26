@@ -4,6 +4,7 @@ from typing import List, Union, Tuple, Optional
 
 import streamlit as st
 from loguru import logger
+from dotenv import load_dotenv
 
 from open_notebook.database.migrate import MigrationManager
 from open_notebook.domain.models import DefaultModels
@@ -118,15 +119,47 @@ def setup_stream_state(current_notebook: Notebook) -> ChatSession:
 
 
 def check_migration():
+    if st.session_state.get("migration_checked_this_session", False):
+        logger.debug("Migration check already performed this session.")
+        return
+
     logger.critical("Running migration check")
-    mm = MigrationManager()
-    if mm.needs_migration:
-        st.warning("The Open Notebook database needs a migration to run properly.")
-        if st.button("Run Migration"):
-            mm.run_migration_up()
-            st.success("Migration successful")
-            st.rerun()
+    try:
+        mm = MigrationManager()
+    except KeyError as e:
+        logger.error(f"Missing environment variable during MigrationManager init: {e}")
+        st.error(f"CRITICAL ERROR: Missing environment variable for DB connection: {e}. Please check .env file and restart.")
+        st.stop() # Stop if basic DB config is missing
+        return
+    except Exception as e:
+        logger.error(f"Error initializing MigrationManager: {e}")
+        st.error(f"CRITICAL ERROR: Could not initialize MigrationManager: {e}")
         st.stop()
+        return
+
+    if mm.needs_migration:
+        st.warning("The Open Notebook database needs a migration. Attempting automatic migration...")
+        try:
+            logger.info("Attempting to run migrations automatically...")
+            mm.run_migration_up()
+            if not mm.needs_migration:
+                st.success("Migration completed successfully.")
+                st.rerun()
+            else:
+                st.error("Migration still needed after automatic attempt. Please check logs. Displaying manual button.")
+                if st.button("Run Migration Manually"):
+                    mm.run_migration_up()
+                    st.success("Manual migration attempt finished. Check logs & UI.")
+                    st.rerun()
+                st.stop() # Restore st.stop() for failed/pending migrations
+        except Exception as e:
+            st.error(f"Error during automatic migration attempt: {e}")
+            logger.error(f"Exception during automatic migration: {e}")
+            logger.exception(e)
+            st.stop() # Stop if automatic migration attempt fails critically
+    else:
+        logger.info("Migration check: Database is up to date.")
+    st.session_state["migration_checked_this_session"] = True # Mark as checked
 
 
 def check_models(only_mandatory=True, stop_on_error=True):
@@ -176,10 +209,17 @@ def setup_page(
     only_check_mandatory_models=True,
     stop_on_model_error=True,
 ):
-    """Common page setup for all pages"""
-    st.set_page_config(
-        page_title=title, layout=layout, initial_sidebar_state=sidebar_state
-    )
+    """Common page setup for all pages.
+    NOTE: st.set_page_config() must be called BEFORE this function in the page script.
+    """
+    load_dotenv()
+    # st.set_page_config( # REMOVED: This must be called in the page script itself.
+    #     page_title=title, layout=layout, initial_sidebar_state=sidebar_state
+    # )
+    # Initialize the flag if it doesn't exist before calling check_migration
+    if "migration_checked_this_session" not in st.session_state:
+        st.session_state["migration_checked_this_session"] = False
+
     check_migration()
     check_models(
         only_mandatory=only_check_mandatory_models, stop_on_error=stop_on_model_error

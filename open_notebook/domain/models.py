@@ -5,6 +5,7 @@ from open_notebook.domain.base import ObjectModel, RecordModel
 from open_notebook.models import (
     MODEL_CLASS_MAP,
     EmbeddingModel,
+    ImageToTextModel,
     LanguageModel,
     ModelType,
     SpeechToTextModel,
@@ -36,6 +37,7 @@ class DefaultModels(RecordModel):
     default_transcript_model_provider: Optional[str] = None
     default_transcript_model: Optional[str] = None
     # default_vision_model: Optional[str]
+    default_image_to_text_model: Optional[str] = None
     default_embedding_model: Optional[str] = None
     default_tools_model: Optional[str] = None
 
@@ -65,7 +67,7 @@ class ModelManager:
             cached_model = self._model_cache[cache_key]
             if not isinstance(
                 cached_model,
-                (LanguageModel, EmbeddingModel, SpeechToTextModel, TextToSpeechModel),
+                (LanguageModel, EmbeddingModel, SpeechToTextModel, TextToSpeechModel, ImageToTextModel),
             ):
                 raise TypeError(
                     f"Cached model is of unexpected type: {type(cached_model)}"
@@ -134,6 +136,18 @@ class ModelManager:
         return model
 
     @property
+    def image_to_text_model(self, **kwargs) -> Optional[ImageToTextModel]:
+        """Get the default image-to-text model"""
+        model_id = self.defaults.default_image_to_text_model
+        if not model_id:
+            return None
+        model = self.get_model(model_id, **kwargs)
+        assert model is None or isinstance(
+            model, ImageToTextModel
+        ), f"Expected ImageToTextModel but got {type(model)}"
+        return model
+
+    @property
     def embedding_model(self, **kwargs) -> Optional[EmbeddingModel]:
         """Get the default embedding model"""
         model_id = self.defaults.default_embedding_model
@@ -174,6 +188,8 @@ class ModelManager:
             model_id = self.defaults.default_speech_to_text_model
         elif model_type == "large_context":
             model_id = self.defaults.large_context_model
+        elif model_type == "image_to_text":
+            model_id = self.defaults.default_image_to_text_model
 
         if not model_id:
             return None

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Tuple, Literal
 import os
 from dotenv import load_dotenv
 import sys
@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import datetime
 from fastapi import Depends
 import logging
-from surrealdb import AsyncSurreal # Assuming this client
+from sblpy.async_connection import AsyncSurrealConnection as AsyncSurreal
 
 # Add project root to sys.path to allow imports from open_notebook
 # This is a common pattern when running a script from a subdirectory
@@ -24,7 +24,7 @@ load_dotenv(dotenv_path=dotenv_path)
 
 # Now we can import from open_notebook
 # Assuming Note and Source are also in notebook.py or accessible via open_notebook.domain
-from open_notebook.domain.notebook import Notebook, Note, Source, Asset, ChatSession # Note: Source and Note are in notebook.py
+from open_notebook.domain.notebook import Notebook, Note, Source, Asset, ChatSession, Task # Note: Source and Note are in notebook.py
 from open_notebook.domain.chat import ChatMessage # Added ChatMessage
 from open_notebook.domain.models import model_manager # Added model_manager
 from open_notebook.exceptions import NotFoundError, DatabaseOperationError, InvalidInputError
@@ -88,6 +88,20 @@ class ChatSessionCreateRequest(BaseModel):
 
 class ChatMessageCreateRequest(BaseModel):
     content: str # Content of the user's message
+
+# --- Task Request Models ---
+class TaskCreateRequest(BaseModel):
+    description: str
+    notebook_id: str # To associate task with a notebook
+    due_date: Optional[datetime.datetime] = None
+    order: Optional[int] = None
+    status: Optional[Literal["todo", "in_progress", "completed"]] = "todo"
+
+class TaskUpdateRequest(BaseModel):
+    description: Optional[str] = None
+    due_date: Optional[datetime.datetime] = None
+    order: Optional[int] = None
+    status: Optional[Literal["todo", "in_progress", "completed"]] = None
 
 # --- Response Models (using existing domain models directly for now) ---
 # FastAPI will automatically convert Pydantic models like Notebook, Note, Source to JSON responses.
@@ -615,6 +629,73 @@ async def run_source_transformation_endpoint(
 
     # Return the updated source object, converted to Pydantic response model
     return SourceResponse.from_domain(source_obj)
+
+# --- Task Endpoints ---
+@app.post("/api/notebooks/{notebook_short_id}/tasks", response_model=Task, status_code=status.HTTP_201_CREATED)
+async def create_task_for_notebook_endpoint(notebook_short_id: str, task_data: TaskCreateRequest):
+    try:
+        notebook_full_id = get_full_id(Notebook.table_name, notebook_short_id)
+        # Ensure notebook exists
+        Notebook.get(notebook_full_id) 
+
+        task = Task(
+            description=task_data.description,
+            notebook=notebook_full_id, # Assign the notebook ID
+            due_date=task_data.due_date,
+            order=task_data.order,
+            status=task_data.status or "todo"
+        )
+        task.save() # This should save the task and assign an ID
+        # Unlike notes/sources, Task model has notebook_id directly.
+        # If an edge relation was used, an equivalent to `task.add_to_notebook(notebook_full_id)` would be here.
+        return task
+    except NotFoundError as e: # For notebook not found
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Notebook not found: {str(e)}")
+    except InvalidInputError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except DatabaseOperationError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.get("/api/notebooks/{notebook_short_id}/tasks", response_model=List[Task])
+async def get_tasks_for_notebook_endpoint(notebook_short_id: str):
+    try:
+        notebook_full_id = get_full_id(Notebook.table_name, notebook_short_id)
+        notebook = Notebook.get(notebook_full_id) # Ensure notebook exists
+        # The Notebook class has a .tasks property that fetches related tasks
+        return notebook.tasks 
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Notebook not found: {str(e)}")
+    except DatabaseOperationError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.put("/api/tasks/{task_short_id}", response_model=Task)
+async def update_task_endpoint(task_short_id: str, task_data: TaskUpdateRequest):
+    try:
+        full_id = get_full_id(Task.table_name, task_short_id)
+        task = Task.get(full_id)
+        update_data = task_data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(task, key, value)
+        task.save()
+        return task
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except InvalidInputError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except DatabaseOperationError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+@app.delete("/api/tasks/{task_short_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task_endpoint(task_short_id: str):
+    try:
+        full_id = get_full_id(Task.table_name, task_short_id)
+        task = Task.get(full_id)
+        task.delete()
+        return
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DatabaseOperationError as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

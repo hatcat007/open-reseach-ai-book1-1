@@ -1,4 +1,4 @@
-import type { Notebook, Source, Note, ChatSession, ChatMessage } from '../types';
+import type { Notebook, Source, Note, ChatSession, ChatMessage, Task } from '../types';
 
 const API_BASE_URL = 'http://localhost:8501/api'; // Replace if your Streamlit API is elsewhere
 
@@ -247,6 +247,37 @@ export const runSourceTransformation = async (
     body: JSON.stringify({ type: transformationType, params: params || {} }),
   });
   return handleApiResponse<TransformationResult>(response);
+};
+
+// --- Task API Functions ---
+export const fetchTasksByNotebookId = async (notebookId: string): Promise<Task[]> => {
+  const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/tasks`);
+  return handleApiResponse<Task[]>(response);
+};
+
+export const createTask = async (notebookId: string, description: string, status?: 'todo' | 'in_progress' | 'completed', due_date?: string, order?: number): Promise<Task> => {
+  const response = await fetch(`${API_BASE_URL}/notebooks/${notebookId}/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description, notebook_id: notebookId, due_date, order, status: status || 'todo' }),
+  });
+  return handleApiResponse<Task>(response);
+};
+
+export const updateTask = async (taskId: string, updates: Partial<Omit<Task, 'id' | 'notebook_id' | 'created_at' | 'updated_at'>>): Promise<Task> => {
+  const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  return handleApiResponse<Task>(response);
+};
+
+export const deleteTask = async (taskId: string): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/tasks/${taskId}`, {
+    method: 'DELETE',
+  });
+  await handleApiResponse<void>(response);
 };
 
 // We can add more mock API functions here later (e.g., fetchNotebookById, createNotebook, etc.) 

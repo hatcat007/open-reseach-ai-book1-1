@@ -6,25 +6,25 @@ maxMessageSize = 500
 [browser]
 serverPort = 8502
 
-# [theme]
+[theme]
 
-# # The preset Streamlit theme that your custom theme inherits from.
-# # One of "light" or "dark".
-# base =
+# The preset Streamlit theme that your custom theme inherits from.
+# One of "light" or "dark".
+base = "dark"
 
-# # Primary accent color for interactive elements.
+# Primary accent color for interactive elements.
 # primaryColor =
 
-# # Background color for the main content area.
+# Background color for the main content area.
 # backgroundColor =
 
-# # Background color used for the sidebar and most interactive widgets.
+# Background color used for the sidebar and most interactive widgets.
 # secondaryBackgroundColor =
 
-# # Color used for almost all text.
+# Color used for almost all text.
 # textColor =
 
-# # Font family for all text in the app, except code blocks. One of "sans serif",
-# # "serif", or "monospace".
-# font =
+# Font family for all text in the app, except code blocks. One of "sans serif",
+# "serif", or "monospace".
+font = "monospace"
 

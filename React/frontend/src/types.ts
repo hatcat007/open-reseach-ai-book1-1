@@ -48,6 +48,17 @@ export interface ChatSession {
   // Add other fields if your backend model for ChatSession has more
 }
 
+export interface Task {
+  id: string;
+  notebook_id: string; // Corresponds to the notebook it belongs to
+  description: string;
+  status: 'todo' | 'in_progress' | 'completed';
+  created_at: string; // ISO date string
+  updated_at: string; // ISO date string
+  due_date?: string;   // ISO date string, optional
+  order?: number;      // Optional ordering number
+}
+
 export interface ChatMessage {
   id: string; // Full ID, e.g., "chat_message:abc789"
   chat_session_id: string; // Full ID of the parent chat session

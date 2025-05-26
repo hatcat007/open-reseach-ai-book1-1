@@ -5,6 +5,7 @@ import type { Notebook, Source, Note, ChatSession as ChatSessionType } from '../
 import SourceList from './SourceList';
 import NoteList from './NoteList';
 import ChatInterface from './ChatInterface';
+import TaskList from './TaskList';
 import {
   Spinner,
   Alert,
@@ -165,6 +166,9 @@ const NotebookDetail: React.FC = () => {
             </Tab>
             <Tab eventKey="notes" title={`Notes (${notebook.noteCount ?? 0})`}>
               {activeTab === 'notes' && notebookId && <NoteList notebookId={notebookId} />}
+            </Tab>
+            <Tab eventKey="tasks" title="Tasks">
+              {activeTab === 'tasks' && notebookId && <TaskList notebookId={notebookId} />}
             </Tab>
             <Tab eventKey="chat" title="Chat">
               {activeTab === 'chat' && notebookId && (

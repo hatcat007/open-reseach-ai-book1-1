@@ -26,7 +26,7 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
 
     process_tab, source_tab = st.tabs(["Process", "Source"])
     with process_tab:
-        c1, c2 = st.columns([4, 2])
+        c1, c2 = st.columns([0.6, 0.4]) # Adjust internal columns, e.g. [2,1] or [0.6, 0.4]
         with c1:
             title = st.empty()
             if source.title:
@@ -67,20 +67,39 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
         with c2:
             transformations = Transformation.get_all(order_by="name asc")
             with st.container(border=True):
-                transformation = st.selectbox(
-                    "Run a transformation",
-                    transformations,
-                    key=f"transformation_{source.id}",
-                    format_func=lambda x: x.name,
-                )
-                st.caption(transformation.description)
-                if st.button("Run"):
-                    asyncio.run(
-                        transform_graph.ainvoke(
-                            input=dict(source=source, transformation=transformation)
-                        )
+                st.write("**Run a transformation**")
+                search_term = st.text_input("Search transformations", key=f"search_transformation_{source.id}")
+
+                if search_term:
+                    filtered_transformations = [
+                        t for t in transformations if search_term.lower() in t.name.lower()
+                    ]
+                else:
+                    filtered_transformations = transformations
+
+                if not filtered_transformations:
+                    st.warning("No transformations match your search.")
+                    selected_transformation = None
+                else:
+                    selected_transformation = st.selectbox(
+                        "Select transformation",
+                        filtered_transformations,
+                        key=f"transformation_{source.id}",
+                        format_func=lambda x: x.name,
+                        label_visibility="collapsed"
                     )
-                    st.rerun(scope="fragment" if modal else "app")
+                
+                if selected_transformation:
+                    st.caption(selected_transformation.description)
+                    if st.button("Run", key=f"run_transformation_button_{source.id}"):
+                        asyncio.run(
+                            transform_graph.ainvoke(
+                                input=dict(source=source, transformation=selected_transformation)
+                            )
+                        )
+                        st.rerun(scope="fragment" if modal else "app")
+                elif not filtered_transformations and transformations:
+                    st.info("Clear search to see all transformations.")
 
             if not model_manager.embedding_model:
                 help = (

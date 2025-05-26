@@ -20,8 +20,15 @@ def db_connection():
     )
     try:
         yield connection
+    except Exception as e:
+        logger.error(f"Error during database operation: {e}")
+        raise
     finally:
-        connection.socket.close()
+        if hasattr(connection, 'socket') and connection.socket:
+            try:
+                connection.socket.close()
+            except Exception as e_close:
+                logger.error(f"Error closing SurrealDB connection socket: {e_close}")
 
 
 def repo_query(query_str: str, vars: Optional[Dict[str, Any]] = None):
@@ -36,8 +43,8 @@ def repo_query(query_str: str, vars: Optional[Dict[str, Any]] = None):
 
 
 def repo_create(table: str, data: Dict[str, Any]):
-    query = f"CREATE {table} CONTENT {data};"
-    return repo_query(query)
+    query = f"CREATE {table} CONTENT $data;"
+    return repo_query(query, {"data": data})
 
 
 def repo_upsert(table: str, data: Dict[str, Any]):

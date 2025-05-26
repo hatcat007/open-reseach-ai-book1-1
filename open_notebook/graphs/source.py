@@ -12,8 +12,8 @@ from typing_extensions import Annotated, TypedDict
 
 from open_notebook.domain.notebook import Asset, Source
 from open_notebook.domain.transformation import Transformation
-from open_notebook.graphs.content_processing import ContentState
-from open_notebook.graphs.content_processing import graph as content_graph
+from open_notebook.graphs.content_processor_graph import ContentState
+from open_notebook.graphs.content_processor_graph import graph as content_graph
 from open_notebook.graphs.transformation import graph as transform_graph
 from open_notebook.utils import surreal_clean
 
@@ -116,13 +116,21 @@ def save_source(state: SourceState) -> dict:
     current_item_content_state = payload["content_state"]
     notebook_id = state.get("notebook_id")
     embed_flag = state.get("embed")
+    processing_error = current_item_content_state.get("error") # Get the error
+
     # current_idx_for_log = payload.get("_current_processing_index_for_debug", -1)
 
-    if not current_item_content_state.get("content"):
-        logger.warning(f"save_source: item has invalid/empty content. Skipping.")
+    if not current_item_content_state.get("content") and not processing_error: # Condition updated
+        logger.warning(f"save_source: item has no content and no processing error. Skipping.")
         return {"source": [], "item_payload_for_saving": None}
 
-    source_title = current_item_content_state.get("title", "Untitled Scraped Content")
+    source_title = current_item_content_state.get("title", "Untitled Source") # Default title
+    if processing_error and not source_title: # If error and no other title, use a generic error title
+        source_title = "Processing Error"
+    elif processing_error and source_title:
+        source_title = f"{source_title} (Processing Error)"
+
+
     source_url = current_item_content_state.get("url")
     source_file_path = current_item_content_state.get("file_path")
     source_asset_type = current_item_content_state.get("source_type")

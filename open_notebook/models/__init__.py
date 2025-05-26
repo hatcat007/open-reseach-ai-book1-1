@@ -1,4 +1,4 @@
-from typing import Dict, Type, Union
+from typing import Dict, Type, Union, Optional
 
 from open_notebook.models.embedding_models import (
     EmbeddingModel,
@@ -37,8 +37,12 @@ from open_notebook.models.text_to_speech_models import (
     OpenAITextToSpeechModel,
     TextToSpeechModel,
 )
+from open_notebook.models.image_to_text_models import (
+    ImageToTextModel,
+    OpenrouterImageToTextModel,
+)
 
-ModelType = Union[LanguageModel, EmbeddingModel, SpeechToTextModel, TextToSpeechModel]
+ModelType = Union[LanguageModel, EmbeddingModel, SpeechToTextModel, TextToSpeechModel, ImageToTextModel]
 
 
 ProviderMap = Dict[str, Type[ModelType]]
@@ -77,6 +81,9 @@ MODEL_CLASS_MAP: Dict[str, ProviderMap] = {
         "gemini": GeminiTextToSpeechModel,
         "huggingface": HFInferenceTextToSpeechModel,
     },
+    "image_to_text": {
+        "openrouter": OpenrouterImageToTextModel,
+    },
 }
 
 __all__ = [
@@ -85,5 +92,6 @@ __all__ = [
     "LanguageModel",
     "SpeechToTextModel",
     "TextToSpeechModel",
+    "ImageToTextModel",
     "ModelType",
 ]
