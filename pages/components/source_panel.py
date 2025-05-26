@@ -84,8 +84,8 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
                     selected_transformation = st.selectbox(
                         "Select transformation",
                         filtered_transformations,
-                        key=f"transformation_{source.id}",
-                        format_func=lambda x: x.name,
+                    key=f"transformation_{source.id}",
+                    format_func=lambda x: x.name,
                         label_visibility="collapsed"
                     )
                 
@@ -94,7 +94,7 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
                     if st.button("Run", key=f"run_transformation_button_{source.id}"):
                         asyncio.run(
                             transform_graph.ainvoke(
-                                input=dict(source=source, transformation=selected_transformation)
+                                    input=dict(source=source, transformation=selected_transformation)
                             )
                         )
                         st.rerun(scope="fragment" if modal else "app")

@@ -84,6 +84,20 @@ MODEL_CLASS_MAP: Dict[str, ProviderMap] = {
     "image_to_text": {
         "openrouter": OpenrouterImageToTextModel,
     },
+    "crawl_4_ai_filter": {
+        "ollama": OllamaLanguageModel,
+        "openrouter": OpenRouterLanguageModel,
+        "vertexai-anthropic": VertexAnthropicLanguageModel,
+        "litellm": LiteLLMLanguageModel,
+        "lmstudio": LMStudioLanguageModel,
+        "vertexai": VertexAILanguageModel,
+        "anthropic": AnthropicLanguageModel,
+        "openai": OpenAILanguageModel,
+        "gemini": GeminiLanguageModel,
+        "xai": XAILanguageModel,
+        "groq": GroqLanguageModel,
+        "huggingface": HFInferenceLanguageModel,
+    },
 }
 
 __all__ = [

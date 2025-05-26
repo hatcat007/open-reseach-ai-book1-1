@@ -63,6 +63,8 @@ dependencies = [
     "pillow>=10.4.0",
     "torchvision>=0.22.0",
     "pytesseract>=0.3.13",
+    "markdown>=3.8",
+    "weasyprint>=65.1",
 ]
 
 [tool.setuptools]

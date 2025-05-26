@@ -3,6 +3,7 @@ import unicodedata
 from importlib.metadata import PackageNotFoundError, version
 from urllib.parse import urlparse
 import uuid
+import os
 
 import requests
 import tomli
@@ -230,3 +231,45 @@ def generate_id(prefix: str = "") -> str:
     if prefix:
         return f"{prefix}:{unique_part}"
     return unique_part
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitizes a string to be used as a filename."""
+    if not filename:
+        return "untitled"
+    # Replace newlines and tabs with a space
+    cleaned_filename = filename.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    # Remove other problematic characters
+    # List of characters to remove or replace, can be expanded
+    # For simplicity, we'll remove common problematic ones for filenames
+    # and limit the length.
+    # Windows forbidden chars: < > : " / \ | ? *
+    # Others that can be problematic: nul byte, control chars
+    # For HTTP headers, quotes and semicolons can also be issues if not handled carefully
+    # by the framework, but st.download_button should quote it.
+    # We focus on OS filename safety here and removing newlines for header safety.
+    
+    # Remove characters that are generally problematic in filenames across OS
+    for char in ["<", ">", ":", "\"", "/", "\\", "|", "?", "*"]:
+        cleaned_filename = cleaned_filename.replace(char, "")
+    
+    # Remove control characters (ASCII 0-31), except tab (9) which we replaced with space
+    cleaned_filename = "".join(c for c in cleaned_filename if ord(c) >= 32 or ord(c) == 9)
+    cleaned_filename = cleaned_filename.replace("\t", " ") # ensure tabs are spaces
+
+    # Replace multiple spaces with a single space
+    cleaned_filename = " ".join(cleaned_filename.split())
+    
+    # Limit length
+    max_len = 100 # Arbitrary max length for sanity
+    if len(cleaned_filename) > max_len:
+        # Find the last space within max_len to avoid cutting words
+        name_part, ext_part = os.path.splitext(cleaned_filename)
+        if len(name_part) > max_len - len(ext_part) -1:
+             name_part = name_part[:max_len - len(ext_part) -1]
+        cleaned_filename = name_part + ext_part
+
+    if not cleaned_filename.strip(): # If it becomes empty after cleaning
+        return "untitled"
+        
+    return cleaned_filename.strip()

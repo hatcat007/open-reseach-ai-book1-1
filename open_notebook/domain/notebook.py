@@ -170,6 +170,7 @@ class Source(ObjectModel):
     title: Optional[str] = None
     topics: Optional[List[str]] = Field(default_factory=list)
     full_text: Optional[str] = None
+    bypass_llm_filter: Optional[bool] = False
 
     def get_context(
         self, context_size: Literal["short", "long"] = "short"

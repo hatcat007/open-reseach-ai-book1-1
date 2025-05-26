@@ -30,6 +30,7 @@ class ContentState(TypedDict):
     identified_provider: Optional[str] # e.g., 'youtube', 'vimeo'
     metadata: Optional[Dict[str, Any]] # For any other metadata
     delete_source: Optional[bool]
+    bypass_llm_filter: Optional[bool] # Added for LLM filter bypass flag
 
     # Other potentially useful fields (can be added based on existing graph needs)
     error: Optional[str]
@@ -70,6 +71,9 @@ async def process_youtube_url(state: ContentState) -> ContentState:
         logger.error("process_youtube_url called without URL in state.")
         return {**state, "error": "URL missing for YouTube processing", "content": ""}
 
+    # Preserve bypass_llm_filter flag from input state
+    bypass_filter = state.get("bypass_llm_filter", False)
+
     try:
         # Extract video_id first, as it's needed for fallback title
         video_id_match = re.search(r"watch\?v=([^&]+)", video_url) or re.search(r"youtu\.be/([^&?]+)", video_url)
@@ -95,7 +99,8 @@ async def process_youtube_url(state: ContentState) -> ContentState:
                 "source_type": "youtube",
                 "identified_type": "video_transcript",
                 "identified_provider": "youtube",
-                "metadata": {"original_url": video_url}
+                "metadata": {"original_url": video_url},
+                "bypass_llm_filter": bypass_filter # Carry over the flag
             }
         
         logger.info(f"Successfully fetched transcript for {video_url}")
@@ -107,6 +112,7 @@ async def process_youtube_url(state: ContentState) -> ContentState:
             "identified_type": "video_transcript",
             "identified_provider": "youtube",
             "metadata": {"original_url": video_url},
+            "bypass_llm_filter": bypass_filter, # Carry over the flag
             "error": None # Clear any prior error
         }
     except Exception as e:
@@ -119,14 +125,16 @@ async def process_youtube_url(state: ContentState) -> ContentState:
             "source_type": "youtube",
             "identified_type": "video_transcript",
             "identified_provider": "youtube",
-            "metadata": {"original_url": video_url}
+            "metadata": {"original_url": video_url},
+            "bypass_llm_filter": bypass_filter # Carry over the flag
         }
 
 async def process_general_url(state: ContentState) -> ContentState:
     url_input = state.get("url")
-    logger.debug(f"Processing general URL: {url_input}")
+    bypass_filter = state.get("bypass_llm_filter", False) # Get the bypass flag
+    logger.debug(f"Processing general URL: {url_input}, Bypass LLM Filter: {bypass_filter}")
     if not url_input:
-        return {**state, "error": "URL missing for general processing", "content": ""}
+        return {**state, "error": "URL missing for general processing", "content": "", "bypass_llm_filter": bypass_filter}
     try:
         if url_input.lower().endswith(".pdf"):
             # Assuming extract_text_from_pdf can handle URLs or local paths if needed by its own logic
@@ -137,7 +145,8 @@ async def process_general_url(state: ContentState) -> ContentState:
             source_type = "pdf"
             identified_type = "pdf_document"
         else: 
-            content = await get_content_from_url(url_input) # Awaited
+            # Pass the bypass_filter flag to get_content_from_url
+            content = await get_content_from_url(url_input, bypass_llm_filter=bypass_filter)
             title = await get_title_from_url(url_input) or url_input # Awaited
             source_type = "webpage"
             identified_type = "html_content"
@@ -149,19 +158,22 @@ async def process_general_url(state: ContentState) -> ContentState:
             "source_type": source_type,
             "identified_type": identified_type,
             "metadata": {"original_url": url_input},
+            "bypass_llm_filter": bypass_filter, # Carry over the flag
             "error": None
         }
     except Exception as e:
         logger.exception(f"Error processing general URL {url_input}")
-        return {**state, "error": str(e), "title": url_input or "URL Processing Error", "content": ""}
+        return {**state, "error": str(e), "title": url_input or "URL Processing Error", "content": "", "bypass_llm_filter": bypass_filter}
 
 def process_file(state: ContentState) -> ContentState:
     file_path_str = state.get("file_path")
-    logger.debug(f"--- process_file node START --- file_path_str from state: '{file_path_str}'") # Log entry and file_path_str
+    # Preserve bypass_llm_filter flag from input state, though not directly used by file processing types here
+    bypass_filter = state.get("bypass_llm_filter", False) 
+    logger.debug(f"--- process_file node START --- file_path_str from state: '{file_path_str}', Bypass LLM Filter: {bypass_filter}") # Log entry and file_path_str
 
     if not file_path_str:
         logger.warning("process_file: file_path_str is None or empty. Returning error.")
-        return {**state, "error": "File path missing", "content": ""}
+        return {**state, "error": "File path missing", "content": "", "bypass_llm_filter": bypass_filter}
     
     file_path_obj = Path(file_path_str)
     file_source_type = get_source_type_from_path(file_path_str) # This now has internal logging
@@ -211,18 +223,22 @@ def process_file(state: ContentState) -> ContentState:
         "source_type": file_source_type, # Overall type
         "identified_type": file_source_type, # Can be same or more specific
         "error": error,
-        "metadata": {"original_filename": file_path_obj.name}
+        "metadata": {"original_filename": file_path_obj.name},
+        "bypass_llm_filter": bypass_filter # Carry over the flag
     }
 
 def process_text_content(state: ContentState) -> ContentState:
     logger.debug("Processing direct text content.")
     pasted_content = state.get("content", "") # Content comes in directly
+    # Preserve bypass_llm_filter flag from input state, though not directly used by text processing
+    bypass_filter = state.get("bypass_llm_filter", False)
     return {
         **state,
         "content": pasted_content,
         "title": state.get("title") or "Pasted Text",
         "source_type": "text",
         "identified_type": "pasted_text",
+        "bypass_llm_filter": bypass_filter, # Carry over the flag
         "error": None
     }
 
@@ -295,7 +311,8 @@ if __name__ == "__main__":
         # Initialize other fields as None or default per ContentState definition
         "content": None, "file_path": None, "title": None, 
         "identified_type": None, "identified_provider": None, 
-        "metadata": None, "delete_source": None, "error": None
+        "metadata": None, "delete_source": None, "error": None,
+        "bypass_llm_filter": False
     }
     result_youtube = graph.invoke(youtube_state_input)
     print(f"YouTube Result: Error: {result_youtube.get('error')}, Title: {result_youtube.get('title')}, Content Length: {len(result_youtube.get('content', ''))}")
@@ -308,7 +325,8 @@ if __name__ == "__main__":
         "source_type": "url_initial", # or let router decide if source_type is None
         "content": None, "file_path": None, "title": None, 
         "identified_type": None, "identified_provider": None, 
-        "metadata": None, "delete_source": None, "error": None
+        "metadata": None, "delete_source": None, "error": None,
+        "bypass_llm_filter": False
     }
     result_web_url = graph.invoke(web_url_state_input)
     print(f"Web URL Result: Error: {result_web_url.get('error')}, Title: {result_web_url.get('title')}, Content Length: {len(result_web_url.get('content', ''))}")
@@ -321,7 +339,8 @@ if __name__ == "__main__":
         "source_type": "text", # Explicitly set for direct text
         "url": None, "file_path": None, 
         "identified_type": None, "identified_provider": None, 
-        "metadata": None, "delete_source": None, "error": None
+        "metadata": None, "delete_source": None, "error": None,
+        "bypass_llm_filter": False
     }
     result_text = graph.invoke(text_input_state)
     print(f"Text Input Result: Error: {result_text.get('error')}, Title: {result_text.get('title')}, Content Length: {len(result_text.get('content', ''))}")

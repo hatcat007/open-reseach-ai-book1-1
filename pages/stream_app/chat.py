@@ -68,6 +68,20 @@ def build_context(notebook_id):
     for id_to_remove in ids_to_remove:
         if id_to_remove in st.session_state[notebook_id]["context_config"]:
             del st.session_state[notebook_id]["context_config"][id_to_remove]
+            # Attempt to remove from query_params as well to prevent re-loading stale IDs
+            item_type, _ = id_to_remove.split(":", 1)
+            query_param_key_note = f"ctx_note_{id_to_remove}"
+            query_param_key_source = f"ctx_source_{id_to_remove}"
+            if item_type == "note" and query_param_key_note in st.query_params:
+                del st.query_params[query_param_key_note]
+            elif item_type == "source" and query_param_key_source in st.query_params:
+                del st.query_params[query_param_key_source]
+            # If the id_to_remove doesn't strictly follow note:item_id or source:item_id,
+            # we might have a broader key if it was just the ID part.
+            # This handles cases where the query param might just be ctx_note_item_id
+            # For safety, let's also check for params that might just have the raw ID part if the split was different.
+            # However, the primary construction of these keys seems to be f"ctx_{item_type}_{item_id_full}"
+            # So the above deletions should be sufficient if keys are consistently formed.
 
     return st.session_state[notebook_id]["context"]
 

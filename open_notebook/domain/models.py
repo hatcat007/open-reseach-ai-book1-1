@@ -40,6 +40,7 @@ class DefaultModels(RecordModel):
     default_image_to_text_model: Optional[str] = None
     default_embedding_model: Optional[str] = None
     default_tools_model: Optional[str] = None
+    default_crawl_4_ai_filter_model: Optional[str] = None
 
 
 class ModelManager:
@@ -159,6 +160,19 @@ class ModelManager:
         ), f"Expected EmbeddingModel but got {type(model)}"
         return model
 
+    @property
+    def crawl_4_ai_filter_model(self, **kwargs) -> Optional[LanguageModel]:
+        """Get the default Crawl4AI content filtering LLM"""
+        model_id = self.defaults.default_crawl_4_ai_filter_model
+        if not model_id:
+            return None
+        # We expect a LanguageModel to be configured for this role
+        model = self.get_model(model_id, **kwargs) 
+        assert model is None or isinstance(
+            model, LanguageModel
+        ), f"Expected LanguageModel for Crawl4AI filter but got {type(model)}"
+        return model
+
     def get_default_model(self, model_type: str, **kwargs) -> Optional[ModelType]:
         """
         Get the default model for a specific type.
@@ -190,6 +204,8 @@ class ModelManager:
             model_id = self.defaults.large_context_model
         elif model_type == "image_to_text":
             model_id = self.defaults.default_image_to_text_model
+        elif model_type == "crawl_4_ai_filter":
+            model_id = self.defaults.default_crawl_4_ai_filter_model
 
         if not model_id:
             return None

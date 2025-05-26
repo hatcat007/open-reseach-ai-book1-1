@@ -25,6 +25,7 @@ model_types = [
     "text_to_speech",
     "speech_to_text",
     "image_to_text",
+    "crawl_4_ai_filter",
 ]
 
 provider_status["ollama"] = os.environ.get("OLLAMA_API_BASE") is not None
@@ -152,6 +153,7 @@ with model_tab:
         "text_to_speech": False,
         "speech_to_text": False,
         "image_to_text": False,
+        "crawl_4_ai_filter": False,
     }
     for model_item in all_models:
         if model_item.type in model_types_available_map:
@@ -347,6 +349,19 @@ with model_defaults_tab:
     if selected_image_to_text_model:
         default_models.default_image_to_text_model = selected_image_to_text_model.id
     st.caption("Select an Image-to-Text model (e.g., from Openrouter). Ensure it's configured in the 'Models' tab first.")
+    st.divider()
+
+    # Handle Crawl4AI Filter LLM selection
+    selected_model = model_selector(
+        "Default Crawl4AI Content Filter LLM",
+        "default_crawl_4_ai_filter_model",
+        selected_id=default_models.default_crawl_4_ai_filter_model,
+        help="This Language Model will be used by Crawl4AI to filter and clean scraped web content.",
+        model_type="crawl_4_ai_filter",
+    )
+    if selected_model:
+        default_models.default_crawl_4_ai_filter_model = selected_model.id
+    st.caption("Recommended to use a capable model (e.g., Gemini Pro, Claude 3 Sonnet, GPT-4o) for best filtering results.")    
     st.divider()
 
     for k, v in defs.items():

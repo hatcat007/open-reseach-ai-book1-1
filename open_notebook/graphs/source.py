@@ -31,6 +31,7 @@ class SourceState(TypedDict):
     embed: bool
     scraped_documents: Optional[List[Document]] # Input for scraping path
     current_scraped_doc_tuple: Annotated[Optional[tuple[int, Document]], lambda _, val: val] # Temp for fanning out
+    bypass_llm_filter_for_scrape: Optional[bool] = False # Added for website scraping bypass
 
 
 class TransformationState(TypedDict):
@@ -116,7 +117,8 @@ def save_source(state: SourceState) -> dict:
     current_item_content_state = payload["content_state"]
     notebook_id = state.get("notebook_id")
     embed_flag = state.get("embed")
-    processing_error = current_item_content_state.get("error") # Get the error
+    processing_error = current_item_content_state.get("error")
+    bypass_filter_flag = current_item_content_state.get("bypass_llm_filter", False) # Get the flag
 
     # current_idx_for_log = payload.get("_current_processing_index_for_debug", -1)
 
@@ -141,11 +143,12 @@ def save_source(state: SourceState) -> dict:
             file_path=source_file_path,
             source_type=source_asset_type
         ),
-        full_text=surreal_clean(current_item_content_state["content"]),
+        full_text=surreal_clean(current_item_content_state["content"] or ""), # Ensure content is not None
         title=surreal_clean(source_title),
+        bypass_llm_filter=bypass_filter_flag  # Set the bypass flag on the Source object
     )
     source_obj.save()
-    logger.info(f"Successfully SAVED source: {source_obj.id} - {source_obj.title}")
+    logger.info(f"Successfully SAVED source: {source_obj.id} - {source_obj.title}, Bypass Filter: {bypass_filter_flag}")
 
     if notebook_id:
         logger.debug(f"Adding source {source_obj.id} to notebook {notebook_id}")
@@ -262,32 +265,38 @@ def fan_out_scraped_documents(state: SourceState, config: RunnableConfig) -> Lis
 
 def process_scraped_document_item(state: SourceState) -> dict:
     doc_tuple = state.get("current_scraped_doc_tuple")
+    global_bypass_llm_filter_for_scrape = state.get("bypass_llm_filter_for_scrape", False) # Get global flag
 
     if not doc_tuple:
         logger.error("process_scraped_document_item called without current_scraped_doc_tuple")
-        return {} # Return empty dict for no state update
+        return {"content_state_for_saving": []} # Return empty list for aggregation
+    
+    index, doc = doc_tuple
+    page_url = doc.metadata.get("source")
+    page_title = doc.metadata.get("title")
+    page_content = doc.page_content
 
-    _index, doc = doc_tuple
+    logger.info(f"Processing scraped document (Index: {index}): {page_url}, Title: {page_title}, Bypass: {global_bypass_llm_filter_for_scrape}")
 
-    if not doc or not doc.page_content:
-        logger.warning(f"Scraped document at index {_index} has no page_content. Skipping.")
-        return {"content_state_for_saving": [], "current_scraped_doc_tuple": None}
-
-
-    logger.info(f"Processed document for staging: {doc.metadata.get('title', 'Untitled')} (URL: {doc.metadata.get('source')})")
-
-    doc_content_state = {
-        "content": doc.page_content,
-        "url": doc.metadata.get("source"),
-        "title": doc.metadata.get("title"),
+    # Construct a ContentState-like dictionary for this item
+    # This will be aggregated by aggregate_scraped_item_for_saving
+    content_state_item_for_aggregation: ContentState = {
+        "url": page_url,
+        "title": page_title or page_url, # Fallback title
+        "content": page_content,
+        "source_type": "webpage", # All scraped docs are webpages
+        "identified_type": "html_content",
+        "bypass_llm_filter": global_bypass_llm_filter_for_scrape, # Pass the flag
+        "error": None, # Assume success from scrape_website for now
         "file_path": None,
-        "source_type": "scraped_web_page"
+        "identified_provider": None,
+        "metadata": {"original_url": page_url, "scraped_doc_index": index},
+        "delete_source": None # Not applicable for scraped docs
     }
-    # This appends to the main state's list via the operator.add annotation
-    return {
-        "content_state_for_saving": [doc_content_state],
-        "current_scraped_doc_tuple": None # Clear after processing
-    }
+    
+    # This node returns a list to be aggregated by the next node
+    # The operator.add on content_state_for_saving handles the aggregation
+    return {"content_state_for_saving": [content_state_item_for_aggregation]}
 
 
 workflow = StateGraph(SourceState)

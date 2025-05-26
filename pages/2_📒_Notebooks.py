@@ -65,6 +65,24 @@ def notebook_page(current_notebook: Notebook):
     if current_notebook.id not in st.session_state:
         st.session_state[current_notebook.id] = {"notebook": current_notebook}
 
+    # Ensure context_config is initialized for the current notebook
+    if "context_config" not in st.session_state[current_notebook.id]:
+        st.session_state[current_notebook.id]["context_config"] = {}
+
+    # Pre-populate context_config for notes with default "🟢 full content"
+    # if they aren't already set (e.g., from query_params on a previous run).
+    # This ensures build_context, called soon after, sees the intended default.
+    default_note_status = note_context_icons[1]  # "🟢 full content"
+    for note_item in current_notebook.notes:
+        if note_item.id not in st.session_state[current_notebook.id]["context_config"]:
+            st.session_state[current_notebook.id]["context_config"][note_item.id] = default_note_status
+            # The note_card will later ensure query_params are also set to this default if needed,
+            # when it runs and potentially finds initial_value_from_session as None.
+
+    # Note: Sources default to "⛔ not in context" which is handled by source_card's default
+    # and build_context correctly skips them, so no pre-population needed for sources here
+    # unless their default desired state was to be "in context".
+
     current_session = setup_stream_state(current_notebook=current_notebook)
     
     notebook_header(current_notebook)

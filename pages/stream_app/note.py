@@ -66,7 +66,16 @@ def note_card(note, notebook_id):
     default_note_display_value = note_context_icons[1]  # Changed from 0 to 1 ("🟢 full content")
 
     # Get the current selection for this note from session_state, which should be populated from query_params on page load
-    current_selection_value = st.session_state[notebook_id]["context_config"].get(note.id, default_note_display_value)
+    initial_value_from_session = st.session_state[notebook_id]["context_config"].get(note.id)
+    current_selection_value = initial_value_from_session if initial_value_from_session else default_note_display_value
+
+    if not initial_value_from_session:
+        # This means we are using the default, so let's make sure context_config reflects this default
+        # This is the crucial part that might be missing for initial load.
+        st.session_state[notebook_id]["context_config"][note.id] = default_note_display_value
+        # Also, update query_params to reflect this default being actively set.
+        # This might trigger an immediate rerun, which should be fine and consistent.
+        st.query_params[f"ctx_note_{note.id}"] = default_note_display_value
     
     try:
         current_display_index = note_context_icons.index(current_selection_value)

@@ -11,7 +11,12 @@ def model_selector(
     selected_id=None,
     help=None,
     model_type: Literal[
-        "language", "embedding", "speech_to_text", "text_to_speech"
+        "language",
+        "embedding",
+        "speech_to_text",
+        "text_to_speech",
+        "crawl_4_ai_filter",
+        "image_to_text",
     ] = "language",
 ) -> Model:
     models = Model.get_models_by_type(model_type)
