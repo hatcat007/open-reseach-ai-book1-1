@@ -65,6 +65,7 @@ dependencies = [
     "pytesseract>=0.3.13",
     "markdown>=3.8",
     "weasyprint>=65.1",
+    "streamlit-agraph>=0.0.45",
 ]
 
 [tool.setuptools]

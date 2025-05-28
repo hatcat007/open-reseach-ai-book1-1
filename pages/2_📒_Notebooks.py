@@ -12,16 +12,26 @@ setup_page("📒 Open Notebook")
 
 def notebook_header(current_notebook: Notebook):
     # This is the ORIGINAL notebook_header function.
-    c1, c2, c3 = st.columns([8, 2, 2])
-    c1.header(current_notebook.name)
-    if c2.button("Back to the list", icon="🔙"):
-        st.session_state["current_notebook_id"] = None
-        if "notebook_id" in st.query_params:
-            del st.query_params["notebook_id"]
-        st.rerun()
+    c1, c_graph, c_refresh, c_back = st.columns([7, 2, 2, 2]) # Adjusted column layout
+    with c1:
+        st.header(current_notebook.name)
+    
+    with c_graph: # New column for View Graph button
+        if st.button("View Graph 🔗", use_container_width=True, help="Visualize notebook connections", key=f"view_graph_{current_notebook.id}"):
+            st.session_state["graph_view_target_notebook_id"] = current_notebook.id
+            st.switch_page("pages/9_🔗_Graph_View.py")
 
-    if c3.button("Refresh", icon="🔄"):
-        st.rerun()
+    with c_refresh:
+        if st.button("Refresh", icon="🔄", use_container_width=True):
+            st.rerun()
+
+    with c_back:
+        if st.button("Back to list", icon="🔙", use_container_width=True):
+            st.session_state["current_notebook_id"] = None
+            if "notebook_id" in st.query_params:
+                del st.query_params["notebook_id"]
+            st.rerun()
+
     current_description = current_notebook.description
     with st.expander(
         current_notebook.description

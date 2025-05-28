@@ -10,6 +10,19 @@ from open_notebook.domain.transformation import Transformation
 from open_notebook.graphs.transformation import graph as transform_graph
 from pages.stream_app.utils import check_models
 from pages.stream_app.utils import extract_plain_think_block, extract_xml_think_block
+from open_notebook.tools.download_utils import (
+    source_to_txt,
+    source_to_md,
+    source_to_json,
+    source_to_docx_bytes,
+    source_to_pdf_bytes,
+    transformation_to_txt,
+    transformation_to_md,
+    transformation_to_json,
+    transformation_to_docx_bytes,
+    transformation_to_pdf_bytes
+)
+from open_notebook.utils import sanitize_filename
 
 
 def source_panel(source_id: str, notebook_id=None, modal=False):
@@ -39,7 +52,8 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
                 from_src = "from text"
             st.caption(f"Created {naturaltime(source.created)}, {from_src}")
             for insight in source.insights:
-                with st.expander(f"**{insight.insight_type}**"):
+                expander_title = insight.insight_type or "Transformation Result"
+                with st.expander(f"**{expander_title}**"):
                     processed_insight_content, think_insight_content = extract_plain_think_block(insight.content or "")
                     if not think_insight_content:
                         processed_insight_content, think_insight_content = extract_xml_think_block(insight.content or "")
@@ -50,19 +64,64 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
                         st.subheader("🤔 Thinking Process")
                         st.text(think_insight_content)
                     
-                    x1, x2 = st.columns(2)
-                    if x1.button(
+                    b_col1, b_col2 = st.columns(2)
+                    if b_col1.button(
                         "Delete", type="primary", key=f"delete_insight_{insight.id}"
                     ):
                         insight.delete()
                         st.rerun(scope="fragment" if modal else "app")
-                        st.toast("Source deleted")
+                        st.toast("Insight (Transformation result) deleted")
                     if notebook_id:
-                        if x2.button(
+                        if b_col2.button(
                             "Save as Note", icon="📝", key=f"save_note_{insight.id}"
                         ):
                             insight.save_as_note(notebook_id)
                             st.toast("Saved as Note. Refresh the Notebook to see it.")
+                    
+                    st.divider()
+                    st.write("**Download Result**")
+                    dl_col1, dl_col2, dl_col3 = st.columns(3)
+                    
+                    safe_insight_title = sanitize_filename(expander_title)
+
+                    with dl_col1:
+                        st.download_button(
+                            label="Download TXT",
+                            data=transformation_to_txt(expander_title, insight.content or ""),
+                            file_name=f"{safe_insight_title}.txt",
+                            mime="text/plain",
+                            key=f"download_txt_insight_{insight.id}"
+                        )
+                        st.download_button(
+                            label="Download DOCX",
+                            data=transformation_to_docx_bytes(expander_title, insight.content or ""),
+                            file_name=f"{safe_insight_title}.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            key=f"download_docx_insight_{insight.id}"
+                        )
+                    with dl_col2:
+                        st.download_button(
+                            label="Download MD",
+                            data=transformation_to_md(expander_title, insight.content or ""),
+                            file_name=f"{safe_insight_title}.md",
+                            mime="text/markdown",
+                            key=f"download_md_insight_{insight.id}"
+                        )
+                        st.download_button(
+                            label="Download PDF",
+                            data=transformation_to_pdf_bytes(expander_title, insight.content or ""),
+                            file_name=f"{safe_insight_title}.pdf",
+                            mime="application/pdf",
+                            key=f"download_pdf_insight_{insight.id}"
+                        )
+                    with dl_col3:
+                        st.download_button(
+                            label="Download JSON",
+                            data=transformation_to_json(expander_title, insight.content or "", original_source_id=source.id, transformation_details=None),
+                            file_name=f"{safe_insight_title}.json",
+                            mime="application/json",
+                            key=f"download_json_insight_{insight.id}"
+                        )
 
         with c2:
             transformations = Transformation.get_all(order_by="name asc")
@@ -138,3 +197,48 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
         if think_content:
             with st.expander("🤔 Thinking logs"):
                 st.text(think_content)
+        
+        st.divider()
+        st.subheader("Download Source")
+        col1, col2, col3 = st.columns(3)
+        
+        safe_title = sanitize_filename(source.title or "source")
+
+        with col1:
+            st.download_button(
+                label="Download TXT",
+                data=source_to_txt(source),
+                file_name=f"{safe_title}.txt",
+                mime="text/plain",
+                key=f"download_txt_src_{source.id}"
+            )
+            st.download_button(
+                label="Download DOCX",
+                data=source_to_docx_bytes(source),
+                file_name=f"{safe_title}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"download_docx_src_{source.id}"
+            )
+        with col2:
+            st.download_button(
+                label="Download MD",
+                data=source_to_md(source),
+                file_name=f"{safe_title}.md",
+                mime="text/markdown",
+                key=f"download_md_src_{source.id}"
+            )
+            st.download_button(
+                label="Download PDF",
+                data=source_to_pdf_bytes(source),
+                file_name=f"{safe_title}.pdf",
+                mime="application/pdf",
+                key=f"download_pdf_src_{source.id}"
+            )
+        with col3:
+            st.download_button(
+                label="Download JSON",
+                data=source_to_json(source),
+                file_name=f"{safe_title}.json",
+                mime="application/json",
+                key=f"download_json_src_{source.id}"
+            )
