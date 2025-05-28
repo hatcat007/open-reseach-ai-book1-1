@@ -65,11 +65,17 @@ def get_source_type_from_path(file_path: str) -> str:
     return 'unknown'
 
 async def process_youtube_url(state: ContentState) -> ContentState:
-    video_url = state.get("url") # Get the URL from the 'url' field
-    logger.debug(f"Processing YouTube URL: {video_url}")
-    if not video_url:
-        logger.error("process_youtube_url called without URL in state.")
+    video_url_raw = state.get("url") # Get the URL from the 'url' field
+    if not video_url_raw:
+        logger.error("process_youtube_url called with missing URL in state.")
         return {**state, "error": "URL missing for YouTube processing", "content": ""}
+
+    video_url = video_url_raw.strip() # Strip whitespace
+    if not video_url: # Explicitly check if URL is empty after stripping
+        logger.error("process_youtube_url called with an empty URL string.")
+        return {**state, "error": "Empty URL provided for YouTube processing.", "content": ""}
+
+    logger.debug(f"Processing YouTube URL (stripped): {video_url}")
 
     # Preserve bypass_llm_filter flag from input state
     bypass_filter = state.get("bypass_llm_filter", False)
@@ -130,11 +136,20 @@ async def process_youtube_url(state: ContentState) -> ContentState:
         }
 
 async def process_general_url(state: ContentState) -> ContentState:
-    url_input = state.get("url")
+    url_input_raw = state.get("url")
     bypass_filter = state.get("bypass_llm_filter", False) # Get the bypass flag
-    logger.debug(f"Processing general URL: {url_input}, Bypass LLM Filter: {bypass_filter}")
-    if not url_input:
+    
+    if not url_input_raw:
+        logger.error("process_general_url called with missing URL in state.")
         return {**state, "error": "URL missing for general processing", "content": "", "bypass_llm_filter": bypass_filter}
+
+    url_input = url_input_raw.strip() # Strip whitespace
+    if not url_input: # Explicitly check if URL is empty after stripping
+        logger.error("process_general_url called with an empty URL string.")
+        return {**state, "error": "Empty URL provided for general processing.", "content": "", "bypass_llm_filter": bypass_filter}
+
+    logger.debug(f"Processing general URL (stripped): {url_input}, Bypass LLM Filter: {bypass_filter}")
+
     try:
         if url_input.lower().endswith(".pdf"):
             # Assuming extract_text_from_pdf can handle URLs or local paths if needed by its own logic

@@ -4,7 +4,7 @@ globs:
 alwaysApply: true
 ---
 1. DO not delele code (uncommit it), and only make and change code
-2. Do not code any react or fastapi, ONLY streamlit following backend to it.
+2. Do not code any react, ONLY streamlit following backend to it.
 3. Understand how the code and app is working before makeing ANY changes or new code.
 4. When working in langgraph, understand how the implamentet system is working, before makeing any changes. Do not change any unnessay code.
 5. In langgraph database, be careful not to delete any already inplamentet code or features.

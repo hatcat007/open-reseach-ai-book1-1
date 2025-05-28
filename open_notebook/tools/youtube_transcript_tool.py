@@ -28,31 +28,47 @@ def get_youtube_transcript(video_url: str) -> str:
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         
-        # Try to find a manually created transcript in English or any other language
+        selected_transcript_to_fetch = None
+
+        # Try to find a manually created transcript in English
         try:
-            transcript = transcript_list.find_manually_created_transcript(['en'])
+            selected_transcript_to_fetch = transcript_list.find_manually_created_transcript(['en'])
+            # logger.debug(f"Found manually created English transcript for {video_id}")
         except NoTranscriptFound:
+            # logger.debug(f"No manually created English transcript for {video_id}. Looking for other manual transcripts.")
             # If no manual English transcript, try to find any manually created transcript
+            # Iterate directly over transcript_list, which yields Transcript objects
             manual_transcripts = [t for t in transcript_list if not t.is_generated]
             if manual_transcripts:
-                transcript = manual_transcripts[0] # Take the first one found
+                selected_transcript_to_fetch = manual_transcripts[0] # Take the first one found
+                # logger.debug(f"Found other manual transcript for {video_id}: {selected_transcript_to_fetch.language}")
             else:
+                # logger.debug(f"No manual transcripts at all for {video_id}. Looking for generated English transcript.")
                 # If no manual transcript at all, try to find an auto-generated English transcript
                 try:
-                    transcript = transcript_list.find_generated_transcript(['en'])
+                    selected_transcript_to_fetch = transcript_list.find_generated_transcript(['en'])
+                    # logger.debug(f"Found auto-generated English transcript for {video_id}")
                 except NoTranscriptFound:
+                    # logger.debug(f"No auto-generated English transcript for {video_id}. Looking for other generated transcripts.")
                     # If no auto-generated English, take the first available generated transcript
+                    # Iterate directly over transcript_list
                     generated_transcripts = [t for t in transcript_list if t.is_generated]
                     if generated_transcripts:
-                        transcript = generated_transcripts[0]
-                    else:
-                        # If still no transcript, raise the original error for a specific language if needed,
-                        # or handle as no transcript available at all.
-                        # For this implementation, we'll fall back to fetching the first available transcript.
-                        transcript = transcript_list.fetch_all_transcripts()[0] # Fallback, might need better logic
+                        selected_transcript_to_fetch = generated_transcripts[0]
+                        # logger.debug(f"Found other generated transcript for {video_id}: {selected_transcript_to_fetch.language}")
+                    # else:
+                        # logger.debug(f"No generated transcripts found for {video_id}.")
+        
+        if not selected_transcript_to_fetch:
+            # Construct a list of available transcript languages and types for debugging
+            # available_transcripts_info = []
+            # for t in transcript_list: # Iterate directly
+            #     available_transcripts_info.append((t.language, t.is_generated))
+            # logger.warning(f"No suitable transcript found after checking all types for video ID: {video_id}. Available: {available_transcripts_info}")
+            return f"Error: No suitable transcript (manual or generated, preferring English) found for video ID: {video_id}."
 
-
-        full_transcript = "\n".join([item['text'] for item in transcript.fetch()])
+        # logger.info(f"Fetching transcript for {video_id} using language: {selected_transcript_to_fetch.language}, generated: {selected_transcript_to_fetch.is_generated}")
+        full_transcript = "\n".join([item['text'] for item in selected_transcript_to_fetch.fetch()])
         return full_transcript
     except TranscriptsDisabled:
         return f"Error: Transcripts are disabled for video ID: {video_id}"

@@ -58,22 +58,27 @@ def display_notebook_graph(notebook_id: str):
     config = Config(width=900,  # Increased width
                     height=700, # Increased height 
                     directed=True, 
-                    physics={
-                        'barnesHut': {
-                            'gravitationalConstant': -30000,
-                            'centralGravity': 0.1, 
-                            'springLength': 200,
-                            'springConstant': 0.05,
-                            'damping': 0.09,
-                            'avoidOverlap': 0.5             # Increased avoidOverlap
-                        },
-                        'minVelocity': 0.75
-                    }, 
+                    physics=True, # Simplest way to enable physics with defaults
+                    # physics={  # Temporarily commenting out detailed physics 
+                    #     'enabled': True,
+                    #     'barnesHut': {
+                    #         'gravitationalConstant': -30000,
+                    #         'centralGravity': 0.1, 
+                    #         'springLength': 200,
+                    #         'springConstant': 0.05,
+                    #         'damping': 0.09,
+                    #         'avoidOverlap': 0.5
+                    #     },
+                    #     'minVelocity': 0.75
+                    # }, 
                     hierarchical=False,
-                    node={'labelProperty': 'label', 'renderLabel': True},
-                    nodeHighlightBehavior=True, 
-                    highlightColor="#F7A7A6", 
-                    collapsible=True,
+                    nodes={}, 
+                    groups={}, # Explicitly provide an empty object for groups
+                    interaction={ 
+                        'hover': True, 
+                        'hoverConnectedEdges': True,
+                        'tooltipDelay': 300
+                    }
                     )
     
     # Display the graph
