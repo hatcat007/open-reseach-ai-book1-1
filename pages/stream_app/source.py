@@ -36,6 +36,7 @@ def add_source(notebook_id):
     source_text = None
     website_url_to_scrape = None
     max_pages_to_scrape = 0
+    enable_llm_filter_for_scrape = True # Default to True
 
     # Updated source types
     source_type_options = ["Link", "Upload", "Text", "Scrape all website", "YouTube Link"]
@@ -61,6 +62,7 @@ def add_source(notebook_id):
     elif source_type == "Scrape all website":
         website_url_to_scrape = st.text_input("Website Base URL (e.g., https://www.example.com)")
         max_pages_to_scrape = st.number_input("Max pages to scrape (0 for all)", min_value=0, value=10, step=1, help="Set to 0 to try and scrape all pages found in the sitemap. Large websites can take a very long time and consume many resources.")
+        enable_llm_filter_for_scrape = st.checkbox("Enable LLM Content Filter", value=True, help="Uses an LLM to try and extract only the main content from scraped pages, removing boilerplate like navigation, footers, etc. Disable if you want the raw HTML or if the LLM is too aggressive.")
         # For this type, scraped_documents will be populated directly later.
     elif source_type == "YouTube Link":
         youtube_url_input = st.text_input("YouTube Video URL")
@@ -113,7 +115,7 @@ def add_source(notebook_id):
                         return
                     status_ui.write(f"Starting website scrape for: {website_url_to_scrape} (max_pages: {max_pages_to_scrape or 'all'})")
                     # Run the scraper (this is an async function)
-                    scraped_docs = asyncio.run(scrape_website(website_url_to_scrape, max_pages=max_pages_to_scrape))
+                    scraped_docs = asyncio.run(scrape_website(website_url_to_scrape, max_pages=max_pages_to_scrape, use_llm_filter=enable_llm_filter_for_scrape))
                     if not scraped_docs:
                         st.warning(f"No documents were scraped from {website_url_to_scrape}. Please check the URL and sitemap.")
                         return

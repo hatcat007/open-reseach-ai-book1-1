@@ -154,11 +154,14 @@ def _prepare_llm_config_for_crawl4ai() -> tuple[Optional[LLMConfig], Optional[st
     current_llm_config = LLMConfig(**llm_config_args)
     
     filter_instruction = (
-        "Extract only the main textual content of the article or page. "
-        "Exclude all website navigation elements (menus, sidebars, breadcrumbs), "
-        "headers, footers, lists of related links, advertisements, and cookie consent pop-ups. "
-        "Remove any isolated URLs or links that are not part of a sentence in the main content. "
-        "Focus on providing a clean, readable version of the core information presented."
+        "Extract only the main textual content of the article or page. Thoroughly remove all website navigation elements "
+        "(menus, sidebars, breadcrumbs, headers, footers, social media links, copyright notices, 'distributor', 'imprint', 'gtc', 'privacy' links), "
+        "lists of related links, advertisements, and cookie consent pop-ups. "
+        "Crucially, remove ALL hyperlink structures (e.g., '[text](URL)' or 'texthttpsURL') and image links (e.g., '![alt text](URL)' or '!imagenamehttpsURL'). "
+        "No URLs should remain in the output, whether they are part of a link or standalone. "
+        "Convert linked text to plain text if the text itself is part of the main content, otherwise remove the linked text entirely. "
+        "Ensure no image filenames or image URLs are present. "
+        "The goal is a clean, readable block of text containing only the core informational content of the page, devoid of any interactive elements or web artifacts."
     )
     api_token_is_set = 'api_token' in llm_config_args
     base_url_val = getattr(current_llm_config, "base_url", None)
@@ -205,8 +208,8 @@ async def get_content_from_url(url: str, browser_config: BrowserConfig = None, b
     logger.warning(f"get_content_from_url: No content found for {url}")
     return ""
 
-async def get_title_from_url(url: str, browser_config: BrowserConfig = None) -> str:
-    """Fetches title from a single URL using Crawl4AILoader.
+async def get_title_from_url(url: str, browser_config: Optional[BrowserConfig] = None) -> str:
+    """Fetches title from a single URL using AsyncWebCrawler directly.
     
     Args:
         url (str): The URL to fetch title from.
@@ -220,12 +223,66 @@ async def get_title_from_url(url: str, browser_config: BrowserConfig = None) -> 
         url = f"https://{url}"
         logger.info(f"get_title_from_url: No scheme in URL, defaulting to HTTPS: {url}")
 
-    loader = Crawl4AILoader(url, browser_config=browser_config, llm_config=None, llm_filter_instruction=None)
-    documents = await loader.aload()
-    if documents and documents[0].metadata and documents[0].metadata.get("title"):
-        return documents[0].metadata["title"]
-    logger.warning(f"get_title_from_url: No title found for {url}")
-    return ""
+    # Use a default BrowserConfig if none is provided, can be simple
+    effective_browser_config = browser_config if browser_config else BrowserConfig(headless=True)
+    
+    # Minimal CrawlerRunConfig, as we only need the title, not full markdown processing here
+    run_config = CrawlerRunConfig() 
+
+    crawler = AsyncWebCrawler(config=effective_browser_config)
+    page_title = ""
+    try:
+        await crawler.start()
+        logger.info(f"get_title_from_url: Attempting to fetch title for {url}")
+        result = await crawler.arun(url, config=run_config)
+        
+        if result and result.success:
+            # Crawl4AI's CrawlResult often has a direct title attribute or in its metadata
+            if hasattr(result, 'title') and result.title and result.title.lower() not in ["watch", "/watch"]:
+                page_title = result.title
+            elif result.metadata and result.metadata.get("title") and result.metadata.get("title").lower() not in ["watch", "/watch"]:
+                page_title = result.metadata.get("title")
+            
+            # Fallback 1: try to parse og:title meta tag
+            if not page_title and result.html:
+                try:
+                    soup = BeautifulSoup(result.html, 'html.parser')
+                    og_title_tag = soup.find('meta', property='og:title')
+                    if og_title_tag and og_title_tag.get('content'):
+                        page_title = og_title_tag['content'].strip()
+                        logger.info(f"get_title_from_url: Extracted title from og:title meta tag for {url}: {page_title}")
+                except Exception as e_parse_og:
+                    logger.warning(f"get_title_from_url: Could not parse HTML for og:title for {url}: {e_parse_og}")
+
+            # Fallback 2: try to parse the <title> tag from raw HTML if not found directly or via og:title
+            if not page_title and result.html:
+                try:
+                    # Re-initialize soup if not already done, or use existing if appropriate scope
+                    soup = BeautifulSoup(result.html, 'html.parser') # Ensure soup is fresh if not parsed above
+                    title_tag = soup.find('title')
+                    if title_tag and title_tag.string:
+                        title_from_tag = title_tag.string.strip()
+                        if title_from_tag.lower() not in ["watch", "/watch"]:
+                            page_title = title_from_tag
+                            logger.info(f"get_title_from_url: Extracted title from <title> HTML tag for {url}: {page_title}")
+                except Exception as e_parse_title:
+                    logger.warning(f"get_title_from_url: Could not parse HTML for <title> tag for {url}: {e_parse_title}")
+
+            if page_title:
+                logger.info(f"get_title_from_url: Successfully fetched title for {url}: {page_title}")
+            else:
+                logger.warning(f"get_title_from_url: Title not found directly or in HTML for {url}")
+        elif result:
+            logger.warning(f"get_title_from_url: Crawl for {url} was not successful. Error: {result.error_message}, Status: {result.status_code}")
+        else:
+            logger.warning(f"get_title_from_url: Crawl for {url} returned no result object.")
+            
+    except Exception as e:
+        logger.exception(f"get_title_from_url: Exception occurred while fetching title for {url}: {e}")
+    finally:
+        await crawler.close()
+    
+    return page_title if page_title else ""
 
 async def _fetch_xml_sitemap_urls(sitemap_url: str) -> list[str]:
     """Fetches and parses an XML sitemap, returning a list of URLs."""
@@ -281,75 +338,148 @@ async def _fetch_sitemap_url_from_robots(base_url: str) -> str | None:
         return None
 
 
-async def scrape_website(base_url: str, max_pages: int = 0, bypass_llm_filter: bool = False) -> list[Document]:
-    """
-    Scrapes a website based on its sitemap.xml or sitemap found in robots.txt.
-    
+async def scrape_website(base_url: str, max_pages: int = 0, use_llm_filter: bool = True) -> list[Document]:
+    """Scrapes a website starting from the base_url, using sitemap if available.
+
     Args:
-        base_url (str): The base URL of the website to scrape (e.g., https://www.example.com).
-        max_pages (int): Maximum number of pages to scrape. 0 for no limit.
-        bypass_llm_filter (bool): If True, LLM content filtering will be skipped for all pages.
+        base_url (str): The base URL of the website to scrape.
+        max_pages (int): Maximum number of pages to scrape. If 0, scrapes all found URLs.
+        use_llm_filter (bool): Whether to use the LLMContentFilter. Defaults to True.
 
     Returns:
-        A list of Document objects, each containing the markdown content of a page.
+        A list of Document objects, each representing a scraped page.
     """
-    parsed_url = urlparse(base_url)
-    if not parsed_url.scheme:
+    if not urlparse(base_url).scheme:
         base_url = f"https://{base_url}"
         logger.info(f"No scheme in base_url, defaulting to HTTPS: {base_url}")
-
     logger.info(f"Starting website scrape for: {base_url}")
-    sitemap_urls_to_try = [urljoin(base_url, "/sitemap.xml")]
-    
-    robots_sitemap_path = await _fetch_sitemap_url_from_robots(base_url)
-    if robots_sitemap_path:
-        robots_sitemap_url = urljoin(base_url, robots_sitemap_path) if robots_sitemap_path.startswith('/') else robots_sitemap_path
-        sitemap_urls_to_try.append(robots_sitemap_url)
 
-    all_page_urls = set()
+    # Attempt to find sitemap from robots.txt or common locations
+    sitemap_url = await _fetch_sitemap_url_from_robots(base_url)
+    sitemap_urls: set[str] = set()
 
-    for sitemap_url in sitemap_urls_to_try:
-        page_urls = await _fetch_xml_sitemap_urls(sitemap_url)
-        for url in page_urls:
-            all_page_urls.add(url)
-            if url.endswith(".xml"):
-                logger.info(f"Found potential sitemap index: {url}, fetching...")
-                nested_urls = await _fetch_xml_sitemap_urls(url)
-                for nested_url in nested_urls:
-                    all_page_urls.add(nested_url)
-    
-    filtered_page_urls = [
-        url for url in all_page_urls 
-        if not url.endswith((".xml", ".txt", ".jpg", ".png", ".pdf"))
-    ]
+    if sitemap_url:
+        logger.info(f"Found sitemap via robots.txt: {sitemap_url}")
+        # Add URLs from sitemap found in robots.txt
+        # And recursively process if it's an index or lists other sitemaps
+        processed_sitemap_urls_in_robots_path = set() # To avoid loops if a sitemap lists itself
+        
+        queue = [sitemap_url]
+        processed_sitemap_urls_in_robots_path.add(sitemap_url)
 
-    logger.info(f"Total unique page URLs found: {len(filtered_page_urls)}")
+        while queue:
+            current_sitemap_to_fetch = queue.pop(0)
+            urls_from_current = await _fetch_xml_sitemap_urls(current_sitemap_to_fetch)
+            sitemap_urls.update(urls_from_current) # Add all found URLs
 
-    if max_pages > 0 and len(filtered_page_urls) > max_pages:
-        logger.info(f"Limiting scrape to {max_pages} pages from {len(filtered_page_urls)} found URLs.")
-        urls_to_scrape = list(filtered_page_urls)[:max_pages]
+            for item_url in urls_from_current:
+                parsed_item_url = urlparse(item_url)
+                parsed_base_url = urlparse(base_url)
+                # Heuristic for sub-sitemap
+                if (item_url.endswith(".xml") and
+                    "sitemap" in item_url.lower() and
+                    parsed_item_url.netloc.endswith(parsed_base_url.netloc.replace("www.","")) and # check domain
+                    item_url != current_sitemap_to_fetch and 
+                    item_url not in processed_sitemap_urls_in_robots_path):
+                    logger.info(f"Found potential sub-sitemap via robots.txt path: {item_url} (from {current_sitemap_to_fetch}), adding to queue.")
+                    queue.append(item_url)
+                    processed_sitemap_urls_in_robots_path.add(item_url)
     else:
-        urls_to_scrape = list(filtered_page_urls)
-
-    all_documents: list[Document] = []
+        logger.info("No sitemap URL found in robots.txt, trying common locations.")
     
-    llm_config_for_scrape = None
-    filter_instruction_for_scrape = None
+    # Try common sitemap locations if not found in robots.txt or to augment
+    common_sitemaps = ["sitemap.xml", "sitemap_index.xml"]
+    processed_common_sitemap_paths = set() # To avoid reprocessing if a common sitemap links to another common one already processed.
 
-    if not bypass_llm_filter:
-        llm_config_for_scrape, filter_instruction_for_scrape = _prepare_llm_config_for_crawl4ai()
+    for sm_path in common_sitemaps:
+        potential_sitemap_url = urljoin(base_url, sm_path)
+        if potential_sitemap_url in processed_common_sitemap_paths:
+            continue
+
+        urls_from_common_sitemap = await _fetch_xml_sitemap_urls(potential_sitemap_url)
+        if urls_from_common_sitemap:
+            sitemap_urls.update(urls_from_common_sitemap) # Add all found URLs
+            processed_common_sitemap_paths.add(potential_sitemap_url)
+
+            # Recursively process if items look like further sitemaps
+            # This is a simplified BFS-like approach for items found in common sitemaps
+            # It avoids complex queueing like the robots.txt path for simplicity,
+            # relying on processed_common_sitemap_paths to prevent redundant top-level fetches.
+            # And _fetch_xml_sitemap_urls should handle not re-adding if it's called multiple times with the same sitemap URL
+            # by virtue of sitemap_urls being a set.
+            
+            queue_common = list(urls_from_common_sitemap) # Start with children of this common sitemap
+            visited_in_common_subtree = {potential_sitemap_url} # Track visited in this specific subtree to avoid loops
+
+            while queue_common:
+                item_url_from_sitemap = queue_common.pop(0)
+                if item_url_from_sitemap in visited_in_common_subtree:
+                    continue
+                
+                is_potential_sub_sitemap = False
+                parsed_item_url = urlparse(item_url_from_sitemap)
+                parsed_base_url = urlparse(base_url)
+
+                # Heuristic: child ends .xml, contains "sitemap", is on same domain-ish,
+                # and is not the parent sitemap that listed it.
+                if (item_url_from_sitemap.endswith(".xml") and
+                    "sitemap" in item_url_from_sitemap.lower() and
+                    parsed_item_url.netloc.endswith(parsed_base_url.netloc.replace("www.","")) and 
+                    item_url_from_sitemap != potential_sitemap_url): # ensure it's not the direct parent
+                    is_potential_sub_sitemap = True
+                
+                if is_potential_sub_sitemap:
+                    visited_in_common_subtree.add(item_url_from_sitemap)
+                    logger.info(f"Found potential sub-sitemap in common path: {item_url_from_sitemap} (from {potential_sitemap_url if potential_sitemap_url in visited_in_common_subtree else 'a sub-sitemap'}), fetching...")
+                    
+                    # Fetch sub-sitemap contents
+                    urls_from_sub_sitemap = await _fetch_xml_sitemap_urls(item_url_from_sitemap)
+                    newly_added_to_main_set = False
+                    for url_in_sub in urls_from_sub_sitemap:
+                        if url_in_sub not in sitemap_urls:
+                            sitemap_urls.add(url_in_sub)
+                            newly_added_to_main_set = True
+                        # Add children of this sub-sitemap to the queue for further exploration
+                        # if they haven't been visited in this subtree yet
+                        if url_in_sub not in visited_in_common_subtree:
+                             queue_common.append(url_in_sub) # Add for further checking even if already in main sitemap_urls
+                                                             # as it might be an unexpanded sitemap itself
+
+    # Remove the sitemap URLs themselves if they were accidentally added as pages to scrape
+    # This filter should be specific to known sitemap index/file names
+    sitemap_urls = {url for url in sitemap_urls if not (url.endswith('sitemap.xml') or url.endswith('sitemap_index.xml'))}
+    
+    page_urls_to_scrape = list(sitemap_urls)
+    if not page_urls_to_scrape:
+        logger.warning(f"No page URLs found from sitemaps for {base_url}. Will attempt to crawl only the base URL.")
+        page_urls_to_scrape = [base_url] # Fallback to scraping just the base_url if no sitemap URLs
     else:
-        logger.info(f"scrape_website: Bypassing LLM content filter for all pages from {base_url}.")
+        logger.info(f"Total unique page URLs found: {len(page_urls_to_scrape)}")
+
+    if max_pages > 0 and len(page_urls_to_scrape) > max_pages:
+        logger.info(f"Limiting scrape to {max_pages} pages from {len(page_urls_to_scrape)} found URLs.")
+        page_urls_to_scrape = page_urls_to_scrape[:max_pages]
     
+    all_documents: list[Document] = []    
+    # Prepare LLM config for filtering, if enabled
+    llm_config_for_filter = None
+    llm_filter_instruction_for_filter = None
+    if use_llm_filter:
+        llm_config_for_filter, llm_filter_instruction_for_filter = _prepare_llm_config_for_crawl4ai()
+    else:
+        logger.info(f"LLMContentFilter is DISABLED for scraping {base_url}.")
+
+    # Configure Browser for Crawl4AI (can be customized)
+    # Example: browser_config = BrowserConfig(headless=True, browser="chromium")
     browser_conf = None 
 
     tasks = [
         Crawl4AILoader(
             url, 
             browser_config=browser_conf, 
-            llm_config=llm_config_for_scrape, 
-            llm_filter_instruction=filter_instruction_for_scrape
-        ).aload() for url in urls_to_scrape
+            llm_config=llm_config_for_filter, 
+            llm_filter_instruction=llm_filter_instruction_for_filter
+        ).aload() for url in page_urls_to_scrape
     ]
     
     results_list = await asyncio.gather(*tasks, return_exceptions=True)
@@ -367,7 +497,7 @@ async def scrape_website(base_url: str, max_pages: int = 0, bypass_llm_filter: b
 async def main_test():
     test_url = "https://streamlit.io" 
     logger.info(f"Testing website scraper for {test_url} WITHOUT LLM filter bypass.")
-    documents_with_filter = await scrape_website(test_url, max_pages=1, bypass_llm_filter=False)
+    documents_with_filter = await scrape_website(test_url, max_pages=1, use_llm_filter=True)
     if documents_with_filter:
         for doc in documents_with_filter:
             print(f"--- WITH FILTER ---")
@@ -380,7 +510,7 @@ async def main_test():
         print(f"No documents were scraped from {test_url} (with filter).")
     
     logger.info(f"Testing website scraper for {test_url} WITH LLM filter bypass.")
-    documents_without_filter = await scrape_website(test_url, max_pages=1, bypass_llm_filter=True)
+    documents_without_filter = await scrape_website(test_url, max_pages=1, use_llm_filter=False)
     if documents_without_filter:
         for doc in documents_without_filter:
             print(f"--- WITHOUT FILTER ---")

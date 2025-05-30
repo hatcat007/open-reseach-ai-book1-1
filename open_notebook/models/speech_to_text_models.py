@@ -3,8 +3,12 @@ Classes for supporting different transcription models
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, Any, Dict
+import os
+
+from huggingface_hub import InferenceClient
+from loguru import logger # Add logger import
 
 
 @dataclass
@@ -69,38 +73,74 @@ class HFInferenceSpeechToTextModel(SpeechToTextModel):
     """
 
     model_name: str  # This will be the Hugging Face model ID, e.g., "openai/whisper-large-v3"
+    client: any = None # Initialize client attribute
+    model_id_or_path: Optional[str] = None # Store the model identifier
 
-    def transcribe(self, audio_file_path: str) -> str:
-        """
-        Transcribes an audio file using a Hugging Face Inference API model.
-        """
+    def __post_init__(self):
         from huggingface_hub import InferenceClient
-        import os
+        from loguru import logger # Import logger
+        import os # Ensure os is available
 
-        client = InferenceClient(
-            token=os.environ.get("HF_API_KEY")
-        )
-
-        # The InferenceClient for ASR expects bytes or a file path.
-        # The example in HF docs for HF Inference provider shows passing the filepath directly.
-        # client.automatic_speech_recognition("sample1.flac", model="openai/whisper-large-v3")
-        # The output structure is like: `{"text": "Transcription result"}`
+        api_key = os.getenv("HF_API_KEY")
+        if not api_key:
+            logger.error("HF_API_KEY not found in environment variables.")
+            self.client = None
+            return
         
-        # Ensure audio_file_path is a string, not a file-like object if it ever changes upstream
-        if not isinstance(audio_file_path, str):
-            # This would be an unexpected input type based on current usage
-            # but good to be defensive. We might need to save a temp file if it's bytes.
-            raise TypeError("audio_file_path must be a string path to the audio file for HFInferenceClient ASR.")
+        # Ensure model_name is set, fallback to model_id_or_path if necessary
+        if not self.model_name and self.model_id_or_path:
+            self.model_name = self.model_id_or_path
+        elif not self.model_name:
+            logger.error("Model name or ID is not set for HFInferenceSpeechToTextModel.")
+            self.client = None
+            return
 
-        result = client.automatic_speech_recognition(
-            audio_file_path, 
-            model=self.model_name
-        )
-        if isinstance(result, dict) and "text" in result:
-            return result["text"]
-        elif isinstance(result, str): # Some models/client versions might return str directly
-            return result
-        else:
-            # Log the unexpected result or raise a more specific error
-            print(f"Unexpected result from HF ASR: {result}")
-            raise ValueError("Failed to transcribe audio or unexpected response format from HF Inference API.")
+        try:
+            logger.info(f"Initializing InferenceClient for model: {self.model_name} with provider 'hf-inference' and Content-Type 'audio/mpeg'")
+            self.client = InferenceClient(
+                model=self.model_name, 
+                token=api_key, 
+                provider="hf-inference",
+                headers={"Content-Type": "audio/mpeg"} # Explicitly set Content-Type
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize InferenceClient for model {self.model_name}: {e}")
+            self.client = None
+
+    def transcribe(self, audio_file_path: str) -> str | None:
+        if not self.client:
+            logger.error(f"Speech-to-text client for model {self.model_name} is not available.")
+            return "Speech-to-text client not available."
+
+        try:
+            with open(audio_file_path, "rb") as f:
+                audio_data_bytes = f.read()
+            
+            logger.info(f"Transcribing audio file: {audio_file_path} using model {self.model_name}")
+            
+            # Call automatic_speech_recognition without the model argument here
+            response = self.client.automatic_speech_recognition(audio_data_bytes)
+            
+            if isinstance(response, dict) and 'text' in response:
+                transcript = response['text']
+                logger.info(f"Successfully transcribed audio from {audio_file_path}")
+                return transcript
+            elif isinstance(response, str): # Sometimes it might directly return text or an error string
+                 logger.warning(f"Transcription for {audio_file_path} returned a string: {response}")
+                 # Check if the string response is the error message we've been seeing
+                 if "Content type 'None' not supported" in response:
+                     logger.error(f"Still receiving 'Content type None not supported' for {self.model_name}")
+                     return f"Error: {response}"
+                 return response # Assuming it's a direct transcript
+            else:
+                logger.error(f"Unexpected response format from transcription model {self.model_name} for {audio_file_path}: {response}")
+                return f"Unexpected response format: {type(response)}"
+
+        except Exception as e:
+            # Check if the exception message itself contains the "Content type 'None' not supported"
+            # This can help confirm if the issue persists even with the dedicated method.
+            if "Content type 'None' not supported" in str(e):
+                logger.error(f"HF ASR 'Content type None not supported' error persist for {self.model_name} with file {audio_file_path} using dedicated method (client initialized with model): {e}", exc_info=True)
+            else:
+                logger.error(f"Error during HF ASR transcription for {self.model_name} with file {audio_file_path} (client initialized with model): {e}", exc_info=True)
+            return f"Error during transcription: {str(e)}"
