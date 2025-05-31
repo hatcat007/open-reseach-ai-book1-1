@@ -66,6 +66,7 @@ dependencies = [
     "markdown>=3.8",
     "weasyprint>=65.1",
     "streamlit-agraph>=0.0.45",
+    "langchain-unstructured>=0.1.6",
 ]
 
 [tool.setuptools]

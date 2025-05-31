@@ -2,6 +2,7 @@
 
 port = 8502
 maxMessageSize = 500
+fileWatcherType = "poll"
 
 [browser]
 serverPort = 8502

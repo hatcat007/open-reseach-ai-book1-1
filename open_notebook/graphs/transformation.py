@@ -4,6 +4,7 @@ from langchain_core.runnables import (
 )
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
+from loguru import logger
 
 from open_notebook.domain.notebook import Source
 from open_notebook.domain.transformation import DefaultPrompts, Transformation
@@ -34,6 +35,11 @@ def run_transformation(state: dict, config: RunnableConfig) -> dict:
 
     system_prompt = Prompter(prompt_text=transformation_prompt_text).render(data=state)
     payload = [SystemMessage(content=system_prompt)] + [HumanMessage(content=content)]
+    
+    logger.debug(f"run_transformation: Preparing to call LLM for transformation '{transformation.title}'.")
+    logger.debug(f"run_transformation: System Prompt being sent to LLM:\n{system_prompt}")
+    logger.debug(f"run_transformation: Human Message content (first 500 chars) being sent to LLM:\n{content[:500] if content else 'N/A'}")
+
     chain = provision_langchain_model(
         str(payload),
         config.get("configurable", {}).get("model_id"),
@@ -42,11 +48,21 @@ def run_transformation(state: dict, config: RunnableConfig) -> dict:
     )
 
     response = chain.invoke(payload)
+    
+    logger.debug(f"run_transformation: LLM response received. Type: {type(response)}, Content (first 100 chars): {getattr(response, 'content', 'N/A')[:100] if hasattr(response, 'content') and response.content else getattr(response, 'content', 'N/A')}")
+
     if source:
-        source.add_insight(transformation.title, response.content)
+        if transformation.title and hasattr(response, 'content') and response.content:
+            logger.info(f"run_transformation: Adding insight '{transformation.title}' to source {source.id}.")
+            source.add_insight(transformation.title, response.content)
+        else:
+            logger.warning(
+                f"Skipping add_insight for source {source.id} due to missing title or content. "
+                f"Title: '{transformation.title}', Response content: '{getattr(response, 'content', 'N/A')}'"
+            )
 
     return {
-        "output": response.content,
+        "output": response.content if hasattr(response, 'content') else None,
     }
 
 

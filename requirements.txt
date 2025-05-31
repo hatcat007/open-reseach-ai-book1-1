@@ -23,3 +23,7 @@ streamlit-shadcn-ui
 streamlit-scrollable-textbox
 streamlit_js_eval
 httpx 
+langchain-unstructured
+torch
+torchaudio
+torchvision
