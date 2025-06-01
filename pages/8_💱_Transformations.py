@@ -386,9 +386,17 @@ with notebook_transform_tab:
                         config=dict(configurable={"model_id": selected_model_nb.id}),
                     )
                     output_content = output.get("output", "") # Safely get output
-                    st.success("Transformation complete!")
-                    st.session_state.nb_transform_output_area.markdown(f"--- Transformation Output ---\n{output_content}")
+                    st.success("Transformation complete!") # Keep the toast for immediate feedback
+                    
+                    # Prepare the full display string for the output area
+                    full_output_display = f"Transformation complete!\n\n--- Transformation Output ---\n{output_content}"
+                    st.session_state.nb_transform_output_area.markdown(full_output_display)
+
+                    # Store the actual (raw) output content in session state for the save button
+                    st.session_state.current_nb_transform_output = output_content
+
                 except OpenAIError as e: # More specific error for OpenAI issues
+                    st.session_state.current_nb_transform_output = None # Clear on error
                     if "context_length_exceeded" in str(e) or "maximum context length" in str(e).lower():
                         st.session_state.nb_transform_output_area.error(
                             f"Error during transformation: The content is too long for the selected model. "
@@ -399,15 +407,29 @@ with notebook_transform_tab:
                         st.session_state.nb_transform_output_area.error(f"An OpenAI error occurred: {e}")
                         st.error(f"An OpenAI error occurred: {e}")
                 except Exception as e:
+                    st.session_state.current_nb_transform_output = None # Clear on error
                     st.session_state.nb_transform_output_area.error(f"Error during transformation: {e}")
                     st.error(f"An unexpected error occurred: {e}")
         else:
             st.warning("Please select a notebook, a transformation, and a model.")
+            st.session_state.current_nb_transform_output = None # Clear if not run
 
-    # Placeholder for results display - THIS ENTIRE BLOCK IS REMOVED
-    # st.markdown("--- Transformation Output ---") # Updated title
-    # if "nb_transform_output_area" not in st.session_state: # ensure it's initialized
-    #     st.session_state.nb_transform_output_area = st.empty()
-    # # The actual st.empty() is now created earlier if it does not exist.
-    # # We just refer to it here for clarity that this is where output goes.
-    # # st.session_state.nb_transform_output_area.markdown("*Output will appear here*") # Optional: default message
+    # "Save as Note" button - appears if there's output
+    if st.session_state.get("current_nb_transform_output") and selected_notebook:
+        if st.button("Save Output as Note", key="nb_save_output_as_note_button"):
+            output_to_save = st.session_state.current_nb_transform_output
+            note_title = f"Transformed Output: {selected_transformation_nb.name if selected_transformation_nb else 'Untitled Transformation'}"
+            
+            try:
+                new_note = Note(
+                    title=note_title,
+                    content=output_to_save,
+                    note_type="ai" # Mark as AI-generated content
+                )
+                new_note.save() # Save the note to the database
+                new_note.add_to_notebook(selected_notebook.id) # Add to the current notebook
+                st.toast(f"Note '{note_title}' saved successfully to notebook '{selected_notebook.name}'!", icon="📝")
+            except Exception as e:
+                st.error(f"Failed to save note: {e}")
+    
+    # The output area itself is managed above and updated on run/error
