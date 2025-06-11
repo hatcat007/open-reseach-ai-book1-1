@@ -43,10 +43,8 @@ provider_status["vertexai-anthropic"] = (
     and os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is not None
 )
 provider_status["gemini"] = os.environ.get("GEMINI_API_KEY") is not None
-provider_status["openrouter"] = (
-    os.environ.get("OPENROUTER_API_KEY") is not None
-    and os.environ.get("OPENAI_API_KEY") is not None
-    and os.environ.get("OPENROUTER_BASE_URL") is not None
+provider_status["openrouter"] = os.environ.get("OPENROUTER_API_KEY") is not None or (
+    CONFIG.get("open_router") and CONFIG["open_router"].get("api_key") and CONFIG["open_router"].get("api_key") != "YOUR_OPEN_ROUTER_API_KEY"
 )
 provider_status["anthropic"] = os.environ.get("ANTHROPIC_API_KEY") is not None
 provider_status["elevenlabs"] = os.environ.get("ELEVENLABS_API_KEY") is not None

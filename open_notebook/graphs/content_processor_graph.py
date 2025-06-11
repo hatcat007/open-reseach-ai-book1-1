@@ -442,39 +442,47 @@ def process_file(state: ContentState) -> ContentState:
     }
 
 def process_text_content(state: ContentState) -> ContentState:
-    logger.debug("Processing direct text content.")
-    pasted_content = state.get("content", "") # Content comes in directly
-    # Preserve bypass_llm_filter flag from input state, though not directly used by text processing
-    bypass_filter = state.get("bypass_llm_filter", False)
+    """Processes raw text content."""
+    logger.debug("Processing text content.")
+    content = state.get("content")
+    if not content:
+        logger.warning("process_text_content called with no content.")
+        return {**state, "content": "", "error": "No content provided."}
+    
+    # Use the first 50 characters as the title
+    title = content.strip()[:50] + "..."
+
     return {
         **state,
-        "content": pasted_content,
-        "title": state.get("title") or "Pasted Text",
+        "content": content,
+        "title": title,
         "source_type": "text",
-        "identified_type": "pasted_text",
-        "bypass_llm_filter": bypass_filter, # Carry over the flag
+        "identified_type": "text",
         "error": None
     }
 
 def route_content(state: ContentState) -> str:
-    logger.debug(f"Routing content with state keys: {list(state.keys())}, source_type: {state.get('source_type')}, url: {state.get('url')[:50] if state.get('url') else None}")
-    
-    # Check for the temporary source_type from Streamlit UI
-    if state.get("source_type") == "youtube_link_initial" and state.get("url"):
-        logger.info("Routing to process_youtube_url based on initial type.")
-        return "process_youtube_url"
-    elif state.get("url"): # General URL (non-YouTube direct or after YouTube processing if URL is re-evaluated)
-        logger.info("Routing to process_general_url.")
-        return "process_general_url"
+    """Routes content to the appropriate processing node."""
+    if state.get("error"):
+        logger.warning(f"Routing to error handler due to pre-existing error: {state.get('error')}")
+        return "error_handler"
+
+    if state.get("url"):
+        url = state.get("url", "").strip()
+        logger.info(f"Routing content from URL: {url}")
+        if "youtube.com" in url or "youtu.be" in url:
+            return "youtube_url"
+        else:
+            return "general_url"
     elif state.get("file_path"):
-        logger.info("Routing to process_file.")
-        return "process_file"
-    elif state.get("content") is not None and state.get("source_type") == "text": # Check for direct text
-        logger.info("Routing to process_text_content.")
-        return "process_text_content"
+        logger.info(f"Routing content from file path: {state.get('file_path')}")
+        return "file"
+    elif state.get("content"):
+        logger.info("Routing raw text content.")
+        return "text_content"
     else:
-        logger.warning(f"No valid content input found for routing. State: { {k:v for k,v in state.items() if k!= 'content'} }")
-        return "error_node"
+        logger.error("Router unable to determine content source. Routing to error handler.")
+        return "error_handler"
 
 def handle_error_node(state: ContentState) -> ContentState:
     error_message = state.get('error', "Unknown error during content processing.")
@@ -498,11 +506,11 @@ graph_builder.add_conditional_edges(
     START,
     route_content,
     {
-        "process_youtube_url": "process_youtube_url",
-        "process_general_url": "process_general_url",
-        "process_file": "process_file",
-        "process_text_content": "process_text_content",
-        "error_node": "error_node"
+        "youtube_url": "process_youtube_url",
+        "general_url": "process_general_url",
+        "file": "process_file",
+        "text_content": "process_text_content",
+        "error_handler": "error_node"
     }
 )
 

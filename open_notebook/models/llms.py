@@ -19,6 +19,7 @@ from langchain_openai import ChatOpenAI
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 from pydantic import SecretStr
 from loguru import logger
+from open_notebook.config import CONFIG
 
 # future: is there a value on returning langchain specific models?
 
@@ -179,17 +180,19 @@ class OpenRouterLanguageModel(LanguageModel):
         kwargs = self.kwargs
         if self.json:
             kwargs["response_format"] = {"type": "json_object"}
+        
+        open_router_config = CONFIG.get("open_router", {})
+        base_url = os.environ.get("OPENROUTER_BASE_URL") or open_router_config.get("base_url", "https://openrouter.ai/api/v1")
+        api_key = os.environ.get("OPENROUTER_API_KEY") or open_router_config.get("api_key", "openrouter")
 
         return ChatOpenAI(
             model=self.model_name,
             temperature=self.temperature or 0.5,
-            base_url=os.environ.get(
-                "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
-            ),
+            base_url=base_url,
             max_tokens=self.max_tokens,
             model_kwargs=kwargs,
             streaming=self.streaming,
-            api_key=SecretStr(os.environ.get("OPENROUTER_API_KEY", "openrouter")),
+            api_key=SecretStr(api_key),
             top_p=self.top_p,
         )
 
