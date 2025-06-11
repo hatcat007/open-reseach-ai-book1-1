@@ -82,23 +82,25 @@ def remove_non_ascii(text) -> str:
     return re.sub(r"[^\x00-\x7F]+", "", text)
 
 
-def remove_non_printable(text) -> str:
-    # Replace any special Unicode whitespace characters with a regular space
-    text = re.sub(r"[\u2000-\u200B\u202F\u205F\u3000]", " ", text)
-
-    # Replace unusual line terminators with a single newline
-    text = re.sub(r"[\u2028\u2029\r]", "\n", text)
-
-    # Remove control characters, except newlines and tabs
-    text = "".join(
-        char for char in text if unicodedata.category(char)[0] != "C" or char in "\n\t"
-    )
-
-    # Replace non-breaking spaces with regular spaces
-    text = text.replace("\xa0", " ").strip()
-
-    # Keep letters (including accented ones), numbers, spaces, newlines, tabs, and basic punctuation
-    return re.sub(r"[^\w\s.,!?\-\n\t]", "", text, flags=re.UNICODE)
+def remove_non_printable(text: str) -> str:
+    """Remove non-printable characters from a string, allowing common punctuation."""
+    if not isinstance(text, str):
+        return "" # Or raise an error, or convert if appropriate
+    # Allow printable ASCII, common Unicode punctuation, and whitespace characters like tabs, newlines
+    # This regex keeps:
+    # - Basic printable ASCII (space to ~)
+    # - Common Unicode punctuation (using \p{P} property)
+    # - Common whitespace (\s, which includes space, tab, newline, carriage return, form feed, vertical tab)
+    # It filters out control characters (except common whitespace) and other non-printable/problematic Unicode.
+    
+    # A more targeted approach for control characters, keeping common whitespace:
+    # Keep letters, numbers, punctuation, symbols, and common whitespace.
+    # Filter out most other control characters (C0 and C1 controls except \t, \n, \r).
+    # This won't strip all "unrenderable" characters but targets control chars well.
+    
+    # MODIFIED: Explicitly keep pipe '|' characters, in addition to the category check
+    cleaned_text = "".join(ch for ch in text if ch == '|' or (unicodedata.category(ch)[0] not in ["C"] or ch in ['\t', '\n', '\r']))
+    return cleaned_text
 
 
 def surreal_clean(text) -> str:
@@ -111,15 +113,22 @@ def surreal_clean(text) -> str:
     Returns:
         str: The cleaned text with adjusted formatting.
     """
-    text = remove_non_printable(text)
+    # MODIFIED: If text looks like a GFM table, skip remove_non_printable
+    # to preserve pipe characters and table structure.
+    if isinstance(text, str) and "|---" in text:
+        pass # Skip remove_non_printable for GFM tables
+    elif isinstance(text, str): # Apply to other strings
+        text = remove_non_printable(text)
+    # If not a string (e.g. None), it will pass through and be handled by later logic or return as is.
 
     # Add space after colon if it's before the first space
-    first_space_index = text.find(" ")
-    colon_index = text.find(":")
-    if colon_index != -1 and (
-        first_space_index == -1 or colon_index < first_space_index
-    ):
-        text = text.replace(":", r"\:", 1)
+    if isinstance(text, str): # Ensure text is still a string before find/replace
+        first_space_index = text.find(" ")
+        colon_index = text.find(":")
+        if colon_index != -1 and (
+            first_space_index == -1 or colon_index < first_space_index
+        ):
+            text = text.replace(":", r"\:", 1)
 
     return text
 

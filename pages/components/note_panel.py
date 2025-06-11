@@ -11,7 +11,7 @@ from open_notebook.tools.download_utils import (
     note_to_md,
     note_to_json,
     note_to_docx_bytes,
-    note_to_pdf_bytes
+    note_to_pdf_bytes,
 )
 from open_notebook.utils import sanitize_filename
 

@@ -37,10 +37,26 @@ def add_source(notebook_id):
     website_url_to_scrape = None
     max_pages_to_scrape = 0
     enable_llm_filter_for_scrape = True # Default to True
+    use_llm_content_filter_for_link = False # Default to False (new)
 
     # Updated source types
     source_type_options = ["Link", "Upload", "Text", "Scrape all website", "YouTube Link"]
     source_type = st.radio("Type", source_type_options)
+
+    # Add processing method selector
+    processing_method_options = ["Docling (recommended)", "Legacy Text-Based"]
+    processing_method_values = ["docling", "legacy"]
+    
+    # Default to Docling
+    selected_processing_method_display = processing_method_options[0]
+    
+    if source_type in ["Link", "Upload"]:
+        selected_processing_method_display = st.radio(
+            "Document Processing Engine", 
+            options=processing_method_options, 
+            index=0, 
+            help="Choose 'Docling' for advanced PDF/document processing. 'Legacy' uses a simpler text extraction method."
+        )
     
     # This will hold the primary input for the graph (either content_state or scraped_documents)
     graph_input_payload = {}
@@ -50,10 +66,26 @@ def add_source(notebook_id):
     if source_type == "Link":
         source_link = st.text_input("Link (URL for a single page, PDF, etc.)")
         content_request_details["url"] = source_link
+        # Add checkbox for LLM content filter for Link type
+        use_llm_content_filter_for_link = st.checkbox(
+            "Enable LLM Content Filter for this link", 
+            value=False,  # Default to False (off)
+            help="Uses an LLM to try and extract only the main content from the linked page. Disable if you want the raw content or if the LLM is too aggressive. This is separate from Docling/Legacy processing for structured files like PDF."
+        )
+        content_request_details["use_llm_content_filter"] = use_llm_content_filter_for_link
+
+        if selected_processing_method_display == processing_method_options[0]: # Docling
+            content_request_details["processing_method"] = processing_method_values[0]
+        else: # Legacy
+            content_request_details["processing_method"] = processing_method_values[1]
         graph_input_payload["content_state"] = content_request_details
     elif source_type == "Upload":
         source_file = st.file_uploader("Upload (PDF, TXT, DOCX, Audio, Video, etc.)")
         content_request_details["delete_source"] = st.checkbox("Delete source after processing", value=True)
+        if selected_processing_method_display == processing_method_options[0]: # Docling
+            content_request_details["processing_method"] = processing_method_values[0]
+        else: # Legacy
+            content_request_details["processing_method"] = processing_method_values[1]
         graph_input_payload["content_state"] = content_request_details
     elif source_type == "Text":
         source_text = st.text_area("Text (Paste any text content here)")
@@ -124,6 +156,13 @@ def add_source(notebook_id):
                     # Ensure content_state is not present if scraped_documents is being used
                     graph_input_payload.pop("content_state", None)
 
+                # Ensure that 'use_llm_content_filter' is only in content_request_details
+                # if it's a "Link" type and not carried over from other types.
+                if source_type != "Link" and "use_llm_content_filter" in content_request_details:
+                    del content_request_details["use_llm_content_filter"]
+                
+                if "content_state" in graph_input_payload and source_type == "Link":
+                    graph_input_payload["content_state"]["use_llm_content_filter"] = use_llm_content_filter_for_link
 
                 # Common parameters for the graph invocation
                 graph_input_payload["notebook_id"] = notebook_id

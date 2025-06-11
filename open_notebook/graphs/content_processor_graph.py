@@ -1,4 +1,4 @@
-from typing import Optional, TypedDict, Union, Dict, Any
+from typing import Optional, TypedDict, Union, Dict, Any, Literal
 from pathlib import Path
 from loguru import logger
 from langgraph.graph import StateGraph, END, START
@@ -13,6 +13,11 @@ from open_notebook.tools.youtube_transcript_tool import get_youtube_transcript
 from open_notebook.tools.website_scraper import get_content_from_url, get_title_from_url
 from open_notebook.tools.unstructured_file_loader import load_file_content
 from open_notebook.tools.image_captioning_tool import get_text_from_image
+from langchain_docling import DoclingLoader
+from langchain_community.document_loaders import CSVLoader, UnstructuredFileLoader
+from langchain_core.documents import Document
+from docling.document_converter import DocumentConverter
+from open_notebook.graphs.content_processing.youtube import get_video_title as get_youtube_video_title_specific
 # from open_notebook.config import UPLOADS_FOLDER # Not directly used in this graph
 
 
@@ -31,6 +36,8 @@ class ContentState(TypedDict):
     metadata: Optional[Dict[str, Any]] # For any other metadata
     delete_source: Optional[bool]
     bypass_llm_filter: Optional[bool] # Added for LLM filter bypass flag
+    processing_method: Optional[Literal['docling', 'legacy']] = 'docling' # Added processing_method
+    use_llm_content_filter: Optional[bool] = False # New field for link-specific LLM filter
 
     # Other potentially useful fields (can be added based on existing graph needs)
     error: Optional[str]
@@ -60,6 +67,9 @@ def get_source_type_from_path(file_path: str) -> str:
     elif ext in ['.doc', '.docx']:
         logger.debug(f"get_source_type_from_path: returning 'docx' for ext '{ext}'")
         return 'docx'
+    elif ext == '.csv':
+        logger.debug(f"get_source_type_from_path: returning 'csv' for ext '{ext}'")
+        return 'csv'
     
     logger.debug(f"get_source_type_from_path: returning 'unknown' for ext '{ext}'")
     return 'unknown'
@@ -81,27 +91,46 @@ async def process_youtube_url(state: ContentState) -> ContentState:
     bypass_filter = state.get("bypass_llm_filter", False)
 
     try:
-        # Extract video_id first, as it's needed for fallback title
-        video_id_match = re.search(r"watch\?v=([^&]+)", video_url) or re.search(r"youtu\.be/([^&?]+)", video_url)
-        video_id_for_title = video_id_match.group(1) if video_id_match else "Unknown ID"
-
-        transcript = get_youtube_transcript(video_url)
+        # Extract video_id first, as it's needed for fallback title and specific title fetching
+        video_id_match = (
+            re.search(r"watch\?v=([^&]+)", video_url) or
+            re.search(r"youtu\.be/([^&?]+)", video_url) or
+            re.search(r"/live/([^&?/\\#]+)", video_url) # Added to handle /live/ URLs
+        )
         
-        # Attempt to get a title
-        video_title = await get_title_from_url(video_url) 
+        video_id = video_id_match.group(1) if video_id_match else None
 
-        # Fallback title logic
-        if not video_title or video_title == video_url or "processing error" in video_title.lower() or video_title.lower() in ["watch", "/watch"]:
-            video_title = f"YouTube Video ({video_id_for_title})"
-            logger.info(f"Using fallback title for YouTube video: {video_title}")
+        if not video_id:
+            logger.warning(f"Could not extract video_id from YouTube URL: {video_url}")
+            # Use the URL itself or a generic error title if video_id extraction fails.
+            video_title = video_url 
+            transcript = "Error: Could not extract video ID from URL."
+        else:
+            # Attempt to get a title using the YouTube-specific function first
+            video_title = await get_youtube_video_title_specific(video_id)
+            logger.info(f"Attempted specific YouTube title fetch for {video_id}: '{video_title}'")
+
+            # Fallback to general get_title_from_url if specific one fails or returns empty
+            if not video_title:
+                logger.info(f"Specific YouTube title fetch failed for {video_id}, falling back to general get_title_from_url.")
+                video_title = await get_title_from_url(video_url)
+            
+            # Further fallback title logic if all else fails or gives generic/error titles
+            if not video_title or video_title == video_url or "processing error" in video_title.lower() or video_title.lower() in ["watch", "/watch", "youtube"]:
+                old_title = video_title # for logging
+                video_title = f"YouTube Video ({video_id})"
+                logger.info(f"Using fallback title for YouTube video ({video_id}): '{video_title}' (was: '{old_title}')")
+
+            # Get transcript (video_id is available here)
+            transcript = get_youtube_transcript(video_url) # This function also extracts video_id internally, but we have it.
         
         if transcript.startswith("Error:"):
             logger.warning(f"Failed to get transcript for {video_url}: {transcript}")
             return {
                 **state,
-                "content": "",
+                "content": transcript, # Use the error message as content
                 "title": video_title,
-                "error": transcript,
+                "error": transcript, # Also keep it in the error field
                 "source_type": "youtube",
                 "identified_type": "video_transcript",
                 "identified_provider": "youtube",
@@ -123,11 +152,12 @@ async def process_youtube_url(state: ContentState) -> ContentState:
         }
     except Exception as e:
         logger.exception(f"Exception in process_youtube_url for {video_url}")
+        error_message = f"Error: A critical error occurred in process_youtube_url: {str(e)}"
         return {
             **state,
-            "content": "",
-            "title": "YouTube Video (Error)",
-            "error": str(e),
+            "content": error_message, # Ensure content shows the error
+            "title": "YouTube Video (Processing Error)",
+            "error": error_message,
             "source_type": "youtube",
             "identified_type": "video_transcript",
             "identified_provider": "youtube",
@@ -137,32 +167,78 @@ async def process_youtube_url(state: ContentState) -> ContentState:
 
 async def process_general_url(state: ContentState) -> ContentState:
     url_input_raw = state.get("url")
-    bypass_filter = state.get("bypass_llm_filter", False) # Get the bypass flag
+    # Get the specific LLM filter setting for links, default to False (off, meaning filter is NOT used by default)
+    user_wants_llm_filter_for_link = state.get("use_llm_content_filter", False)
     
+    # This is the original bypass_llm_filter from the state, typically for "Scrape all website"
+    # It should be preserved if present, or defaulted.
+    original_bypass_llm_filter_for_scrape = state.get("bypass_llm_filter", False)
+
     if not url_input_raw:
         logger.error("process_general_url called with missing URL in state.")
-        return {**state, "error": "URL missing for general processing", "content": "", "bypass_llm_filter": bypass_filter}
+        return {
+            **state, 
+            "error": "URL missing for general processing", 
+            "content": "", 
+            "use_llm_content_filter": user_wants_llm_filter_for_link, # Preserve user's choice for this link
+            "bypass_llm_filter": original_bypass_llm_filter_for_scrape # Preserve original scrape setting
+        }
 
-    url_input = url_input_raw.strip() # Strip whitespace
-    if not url_input: # Explicitly check if URL is empty after stripping
+    url_input = url_input_raw.strip()
+    if not url_input:
         logger.error("process_general_url called with an empty URL string.")
-        return {**state, "error": "Empty URL provided for general processing.", "content": "", "bypass_llm_filter": bypass_filter}
+        return {
+            **state, 
+            "error": "Empty URL provided for general processing.", 
+            "content": "", 
+            "use_llm_content_filter": user_wants_llm_filter_for_link, # Preserve user's choice
+            "bypass_llm_filter": original_bypass_llm_filter_for_scrape # Preserve original scrape setting
+        }
 
-    logger.debug(f"Processing general URL (stripped): {url_input}, Bypass LLM Filter: {bypass_filter}")
+    # For non-PDF URLs, the decision to USE the LLM filter comes from user_wants_llm_filter_for_link.
+    # The get_content_from_url function's bypass_llm_filter param is True if we want to SKIP the filter.
+    # So, effective_bypass_for_url_tool = not user_wants_llm_filter_for_link
+    effective_bypass_for_url_tool = True # Default to bypassing (not using) the filter
+    if not url_input.lower().endswith(".pdf"):
+        effective_bypass_for_url_tool = not user_wants_llm_filter_for_link
+
+    logger.debug(f"Processing general URL (stripped): {url_input}, User wants LLM Filter for this link: {user_wants_llm_filter_for_link}, Effective Bypass for get_content_from_url: {effective_bypass_for_url_tool}")
+    
+    processing_method = state.get("processing_method", "docling")
+    docling_failed = False
+    content = ""
+    title = ""
+    source_type = ""
+    identified_type = ""
 
     try:
         if url_input.lower().endswith(".pdf"):
-            # Assuming extract_text_from_pdf can handle URLs or local paths if needed by its own logic
-            # If extract_text_from_pdf is also async, it needs to be awaited.
-            # For now, assuming it's synchronous or handles its async nature internally if it's from a library.
-            content = extract_text_from_pdf(url_input, is_url=True) 
-            title = await get_title_from_url(url_input) or Path(url_input).name # Awaited
             source_type = "pdf"
             identified_type = "pdf_document"
+            title = await get_title_from_url(url_input) or Path(url_input).name
+            
+            # LLM content filter is not applicable to direct PDF URLs, it's for web page content
+            logger.info(f"Processing PDF URL: {url_input}. LLM content filter is bypassed.")
+
+            if processing_method == "docling":
+                try:
+                    logger.info(f"Attempting to process PDF URL with Docling: {url_input}")
+                    loader = DoclingLoader(url_input)
+                    docs = loader.load()
+                    content = "\\n\\n".join([doc.page_content for doc in docs]) if docs else ""
+                    if not content:
+                        logger.warning(f"Docling processed PDF URL {url_input} but returned no content.")
+                except Exception as e_docling:
+                    logger.error(f"Docling failed for PDF URL {url_input}: {e_docling}. Falling back to legacy.")
+                    docling_failed = True
+            
+            if processing_method == "legacy" or docling_failed:
+                logger.info(f"Processing PDF URL with legacy method: {url_input}")
+                content = extract_text_from_pdf(url_input, is_url=True)
         else: 
-            # Pass the bypass_filter flag to get_content_from_url
-            content = await get_content_from_url(url_input, bypass_llm_filter=bypass_filter)
-            title = await get_title_from_url(url_input) or url_input # Awaited
+            # For non-PDFs, use the effective_bypass_for_url_tool based on user's checkbox
+            content = await get_content_from_url(url_input, bypass_llm_filter=effective_bypass_for_url_tool)
+            title = await get_title_from_url(url_input) or url_input
             source_type = "webpage"
             identified_type = "html_content"
         
@@ -173,22 +249,41 @@ async def process_general_url(state: ContentState) -> ContentState:
             "source_type": source_type,
             "identified_type": identified_type,
             "metadata": {"original_url": url_input},
-            "bypass_llm_filter": bypass_filter, # Carry over the flag
+            "use_llm_content_filter": user_wants_llm_filter_for_link, # Carry over the user's choice for this specific link
+            "bypass_llm_filter": original_bypass_llm_filter_for_scrape, # Preserve original general scrape setting
             "error": None
         }
     except Exception as e:
         logger.exception(f"Error processing general URL {url_input}")
-        return {**state, "error": str(e), "title": url_input or "URL Processing Error", "content": "", "bypass_llm_filter": bypass_filter}
+        return {
+            **state, 
+            "error": str(e), 
+            "title": url_input or "URL Processing Error", 
+            "content": "", 
+            "use_llm_content_filter": user_wants_llm_filter_for_link, # Preserve choice
+            "bypass_llm_filter": original_bypass_llm_filter_for_scrape # Preserve scrape setting
+        }
 
 def process_file(state: ContentState) -> ContentState:
     file_path_str = state.get("file_path")
-    # Preserve bypass_llm_filter flag from input state, though not directly used by file processing types here
-    bypass_filter = state.get("bypass_llm_filter", False) 
-    logger.debug(f"--- process_file node START --- file_path_str from state: '{file_path_str}', Bypass LLM Filter: {bypass_filter}") # Log entry and file_path_str
+    # Preserve original bypass_llm_filter flag (for scraping) from input state.
+    # It's not directly used by file processing types here but should be carried forward.
+    original_bypass_llm_filter_for_scrape = state.get("bypass_llm_filter", False)
+    # Preserve use_llm_content_filter (for links) from input state.
+    # It's not directly used by file processing types but should be carried forward if somehow set.
+    user_wants_llm_filter_for_link = state.get("use_llm_content_filter", False)
+    
+    logger.debug(f"--- process_file node START --- file_path_str from state: '{file_path_str}', Original Scrape Bypass: {original_bypass_llm_filter_for_scrape}, Link LLM Filter Choice: {user_wants_llm_filter_for_link}")
 
     if not file_path_str:
         logger.warning("process_file: file_path_str is None or empty. Returning error.")
-        return {**state, "error": "File path missing", "content": "", "bypass_llm_filter": bypass_filter}
+        return {
+            **state, 
+            "error": "File path missing", 
+            "content": "", 
+            "bypass_llm_filter": original_bypass_llm_filter_for_scrape,
+            "use_llm_content_filter": user_wants_llm_filter_for_link
+        }
     
     file_path_obj = Path(file_path_str)
     file_source_type = get_source_type_from_path(file_path_str) # This now has internal logging
@@ -197,6 +292,9 @@ def process_file(state: ContentState) -> ContentState:
     title = file_path_obj.name
     content = ""
     error = None
+    processing_method = state.get("processing_method", "docling") # Get processing method
+    docling_failed = False
+
     # Determine the MIME type for image processing
     mime_type = "image/jpeg" # Default
     if file_source_type == 'image':
@@ -217,12 +315,112 @@ def process_file(state: ContentState) -> ContentState:
                 error = content # The tool returns error messages starting with "Error:"
                 content = "" # Clear content if there was an error from the tool
         elif file_source_type == 'pdf':
-            content = extract_text_from_pdf(str(file_path_obj))
+            if processing_method == "docling":
+                try:
+                    logger.info(f"Attempting to process PDF file with Docling: {file_path_str}")
+                    loader = DoclingLoader(str(file_path_obj))
+                    docs = loader.load()
+                    content = "\\n\\n".join([doc.page_content for doc in docs]) if docs else ""
+                    if not content:
+                        logger.warning(f"Docling processed PDF file {file_path_str} but returned no content. Setting docling_failed=True.")
+                        docling_failed = True
+                except Exception as e_docling:
+                    logger.error(f"Docling failed for PDF file {file_path_str}: {e_docling}. Falling back to legacy.")
+                    docling_failed = True
+            
+            if processing_method == "legacy" or docling_failed:
+                logger.info(f"Processing PDF file with legacy method: {file_path_str}")
+                content = extract_text_from_pdf(str(file_path_obj))
+        elif file_source_type == 'csv':
+            if processing_method == "docling":
+                docling_failed = False
+                try:
+                    logger.info(f"Attempting to process CSV file with Docling (DocumentConverter targeting markdown table): {file_path_str}")
+                    
+                    converter = DocumentConverter()
+                    result = converter.convert(str(file_path_obj)) # Use converter.convert()
+
+                    if result and result.document:
+                        docling_doc = result.document
+                        # Use default export, which seems to be GFM table for CSVs
+                        content = docling_doc.export_to_markdown()
+                        logger.info(f"Docling default export_to_markdown() for CSV {file_path_str} (type: {type(content)}):") # End f-string before newline
+                        logger.info(content) # Log the actual content on a new line
+                        
+                        if not content: # Check if content is empty after conversion
+                            logger.warning(f"Docling (via DocumentConverter and default export_to_markdown) for CSV {file_path_str} resulted in no content. Setting docling_failed=True.")
+                            docling_failed = True
+                    else:
+                        logger.warning(f"Docling DocumentConverter().convert() failed to produce a result or document for CSV: {file_path_str}")
+                        docling_failed = True
+
+                    if not docling_failed:
+                         logger.debug(f"Docling (DocumentConverter with csv_to_markdown_table) markdown output for CSV {file_path_str}: {content[:1500]}...")
+                    
+                except Exception as e_docling:
+                    logger.error(f"Docling (via DocumentConverter for markdown table) failed for CSV file {file_path_str}: {e_docling}. Setting docling_failed=True.")
+                    docling_failed = True
+                
+                if docling_failed:
+                    logger.info(f"Docling processing failed for CSV {file_path_str}. Falling back to CSVLoader.")
+                    # Fallback to CSVLoader
+                    try:
+                        loader = CSVLoader(file_path=file_path_str)
+                        docs = loader.load()
+                        content = "\n".join([doc.page_content for doc in docs])
+                        logger.info(f"Successfully processed CSV {file_path_str} with CSVLoader fallback.")
+                    except Exception as e_csvloader:
+                        logger.error(f"CSVLoader also failed for {file_path_str}: {e_csvloader}. Falling back to UnstructuredFileLoader.")
+                        # Fallback to UnstructuredFileLoader
+                        try:
+                            loader = UnstructuredFileLoader(file_path_str)
+                            docs = loader.load()
+                            content = "\n".join([doc.page_content for doc in docs])
+                            logger.info(f"Successfully processed CSV {file_path_str} with UnstructuredFileLoader fallback.")
+                        except Exception as e_unstructured:
+                            logger.error(f"UnstructuredFileLoader also failed for {file_path_str}: {e_unstructured}. No content extracted.")
+                            content = "" # Ensure content is empty string if all fail
+            else: # Legacy or Docling failed and fell through
+                try:
+                    logger.info(f"Processing CSV file with CSVLoader: {file_path_str}")
+                    loader = CSVLoader(file_path=str(file_path_obj)) # CSVLoader might have different parameters
+                    docs = loader.load()
+                    content = "\n\n".join([doc.page_content for doc in docs]) if docs else ""
+                except Exception as e_csvloader:
+                    logger.error(f"CSVLoader also failed for {file_path_str}: {e_csvloader}. Falling back to unstructured.")
+                    # Fallback to unstructured if CSVLoader also fails
+                    legacy_docs = load_file_content(str(file_path_obj))
+                    content = "\n\n".join([doc.page_content for doc in legacy_docs]) if legacy_docs else ""
+                    if not content:
+                        error = f"All CSV processing methods failed for {file_path_str}."
+
+        elif file_source_type == 'docx':
+            if processing_method == "docling":
+                try:
+                    logger.info(f"Attempting to process DOCX file with Docling: {file_path_str}")
+                    loader = DoclingLoader(str(file_path_obj))
+                    docs = loader.load()
+                    content = "\\n\\n".join([doc.page_content for doc in docs]) if docs else ""
+                    logger.debug(f"Docling output for DOCX {file_path_str}: {content[:500]}...")
+                    if not content:
+                        logger.warning(f"Docling processed DOCX {file_path_str} but returned no content. Will use unstructured.")
+                        docling_failed = True
+                except Exception as e_docling:
+                    logger.error(f"Docling failed for DOCX file {file_path_str}: {e_docling}. Falling back to unstructured.")
+                    docling_failed = True
+            
+            if processing_method == "legacy" or docling_failed:
+                logger.info(f"Processing DOCX file with UnstructuredFileLoader (legacy): {file_path_str}")
+                docs = load_file_content(str(file_path_obj))
+                content = "\\n\\n".join([doc.page_content for doc in docs]) if docs else ""
+                if not content:
+                    error = f"UnstructuredFileLoader failed for DOCX {file_path_str}."
+
         elif file_source_type in ['audio', 'video']:
             content = speech_to_text(str(file_path_obj))
         elif file_source_type in ['txt', 'docx'] or file_source_type == 'unknown':
             docs = load_file_content(str(file_path_obj))
-            content = "\n\n".join([doc.page_content for doc in docs]) if docs else ""
+            content = "\\n\\n".join([doc.page_content for doc in docs]) if docs else ""
             if not content and file_source_type == 'unknown':
                  error = f"Unsupported file type or empty content: {file_source_type}"
         else:
@@ -239,7 +437,8 @@ def process_file(state: ContentState) -> ContentState:
         "identified_type": file_source_type, # Can be same or more specific
         "error": error,
         "metadata": {"original_filename": file_path_obj.name},
-        "bypass_llm_filter": bypass_filter # Carry over the flag
+        "bypass_llm_filter": original_bypass_llm_filter_for_scrape, # Carry over the original scrape bypass flag
+        "use_llm_content_filter": user_wants_llm_filter_for_link # Carry over the link-specific filter choice
     }
 
 def process_text_content(state: ContentState) -> ContentState:

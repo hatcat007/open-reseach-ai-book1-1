@@ -120,22 +120,27 @@ def save_source(state: SourceState) -> dict:
     processing_error = current_item_content_state.get("error")
     bypass_filter_flag = current_item_content_state.get("bypass_llm_filter", False) # Get the flag
 
-    # current_idx_for_log = payload.get("_current_processing_index_for_debug", -1)
+    # --- BEGIN DEBUG LOG ---
+    raw_content_before_clean = current_item_content_state.get("content", "")
+    logger.info(f"SAVE_SOURCE_NODE: Raw content before surreal_clean and Source object creation:\n{raw_content_before_clean}")
+    # --- END DEBUG LOG ---
 
     if not current_item_content_state.get("content") and not processing_error: # Condition updated
         logger.warning(f"save_source: item has no content and no processing error. Skipping.")
         return {"source": [], "item_payload_for_saving": None}
 
-    source_title = current_item_content_state.get("title", "Untitled Source") # Default title
-    if processing_error and not source_title: # If error and no other title, use a generic error title
-        source_title = "Processing Error"
-    elif processing_error and source_title:
-        source_title = f"{source_title} (Processing Error)"
-
+    source_title = current_item_content_state.get("title") or "Untitled Source"
+    source_asset_type = current_item_content_state.get("identified_type")
 
     source_url = current_item_content_state.get("url")
     source_file_path = current_item_content_state.get("file_path")
-    source_asset_type = current_item_content_state.get("source_type")
+
+    cleaned_content_for_db = surreal_clean(current_item_content_state["content"] or "")
+    cleaned_title_for_db = surreal_clean(source_title)
+
+    # --- BEGIN DEBUG LOG ---
+    logger.info(f"SAVE_SOURCE_NODE: Content AFTER surreal_clean, before Source object save:\n{cleaned_content_for_db}")
+    # --- END DEBUG LOG ---
 
     source_obj = Source( # Renamed to source_obj to avoid conflict with state key
         asset=Asset(
@@ -143,8 +148,8 @@ def save_source(state: SourceState) -> dict:
             file_path=source_file_path,
             source_type=source_asset_type
         ),
-        full_text=surreal_clean(current_item_content_state["content"] or ""), # Ensure content is not None
-        title=surreal_clean(source_title),
+        full_text=cleaned_content_for_db, # Use the cleaned content
+        title=cleaned_title_for_db, # Use the cleaned title
         bypass_llm_filter=bypass_filter_flag  # Set the bypass flag on the Source object
     )
     source_obj.save()

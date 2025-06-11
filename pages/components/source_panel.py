@@ -1,11 +1,14 @@
 import asyncio
-
 import streamlit as st
-import streamlit_scrollable_textbox as stx  # type: ignore
+import streamlit_scrollable_textbox as stx  # type: ignore # Re-add this import
+import streamlit_antd_components as sac
 from humanize import naturaltime
+from loguru import logger
+import pandas as pd
+from io import StringIO
 
 from open_notebook.domain.models import model_manager
-from open_notebook.domain.notebook import Source
+from open_notebook.domain.notebook import Source, Notebook
 from open_notebook.domain.transformation import Transformation
 from open_notebook.graphs.transformation import graph as transform_graph
 from pages.stream_app.utils import check_models
@@ -20,9 +23,10 @@ from open_notebook.tools.download_utils import (
     transformation_to_md,
     transformation_to_json,
     transformation_to_docx_bytes,
-    transformation_to_pdf_bytes
+    transformation_to_pdf_bytes,
 )
 from open_notebook.utils import sanitize_filename
+from open_notebook.utils import token_count
 
 
 def source_panel(source_id: str, notebook_id=None, modal=False):
@@ -188,16 +192,82 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
 
     with source_tab:
         st.subheader("Content")
-        processed_content, think_content = extract_plain_think_block(source.full_text or "")
-        if not think_content:
-            processed_content, think_content = extract_xml_think_block(source.full_text or "")
         
-        stx.scrollableTextbox(processed_content, height=300)
+        # --- BEGIN MODIFICATION: Attempt to display GFM table with st.dataframe ---
+        raw_content = source.full_text or ""
+        gfm_table_displayed = False
 
-        if think_content:
-            with st.expander("🤔 Thinking logs"):
-                st.text(think_content)
+        # Basic check for GFM table: starts with '|' and contains a separator line an indication of GFM table
+        if raw_content.strip().startswith("|") and "\\n|---" in raw_content:
+            try:
+                # Prepare the GFM string for pd.read_csv
+                # 1. Split into lines and strip whitespace from each line
+                lines = [line.strip() for line in raw_content.strip().split('\\n')]
+                
+                # 2. Filter out the GFM separator line (e.g., |---|---|) as read_csv expects only header and data
+                # Also filter empty lines that might result from splitting
+                data_lines = [line for line in lines if line and not line.replace('|', '').replace('-', '').strip() == ""]
+                
+                if len(data_lines) > 1: # We need at least a header and one data row
+                    # Join the remaining lines back into a string
+                    cleaned_gfm_for_pandas = "\\n".join(data_lines)
+                    string_io_data = StringIO(cleaned_gfm_for_pandas)
+                    
+                    # Use read_csv with pipe delimiter.
+                    # The first line of data_lines will be treated as the header.
+                    df = pd.read_csv(string_io_data, sep='|', lineterminator='\\n', skipinitialspace=True)
+
+                    # Post-processing DataFrame:
+                    # 1. Drop first and last columns if they are empty (often artifacts of leading/trailing pipes)
+                    if not df.empty:
+                        # Check and drop the first column if it's entirely empty/whitespace or unnamed
+                        first_col_name = str(df.columns[0])
+                        if first_col_name.strip() == "" or "Unnamed: 0" in first_col_name:
+                            if df[df.columns[0]].isnull().all() or df[df.columns[0]].astype(str).str.strip().eq('').all():
+                                df = df.iloc[:, 1:]
+                        
+                        # Check and drop the last column if it's entirely empty/whitespace or unnamed
+                        if len(df.columns) > 0: # Check if columns are left
+                            last_col_name = str(df.columns[-1])
+                            if last_col_name.strip() == "" or "Unnamed:" in last_col_name: # Covers "Unnamed: X"
+                                if df[df.columns[-1]].isnull().all() or df[df.columns[-1]].astype(str).str.strip().eq('').all():
+                                    df = df.iloc[:, :-1]
+                    
+                    # 2. Strip whitespace from column names
+                    if not df.empty:
+                        df.columns = [str(col).strip() for col in df.columns]
+                    
+                    # 3. Reset index if columns were dropped or for cleanliness
+                    if not df.empty:
+                        df.reset_index(drop=True, inplace=True)
+
+                    if not df.empty:
+                        # Convert DataFrame to Markdown string
+                        markdown_output = df.to_markdown(index=False)
+                        # Display with st.markdown, wrapped in a container
+                        with st.container(): # Ensure it's in a container
+                            st.markdown(markdown_output)
+                        gfm_table_displayed = True
+                    else:
+                        logger.warning("Tried to parse GFM to DataFrame, but result was empty after processing. Falling back to markdown.")
+                else:
+                    logger.warning("Not enough data lines to form a DataFrame after filtering GFM table. Falling back to markdown.")
+            except Exception as e:
+                logger.warning(f"Failed to parse GFM table with pandas: {e}. Falling back to markdown. Raw content (first 500 chars):\\n{raw_content[:500]}")
         
+        if not gfm_table_displayed:
+            # Fallback to original markdown rendering if not a GFM table or if parsing failed
+            processed_content, think_content = extract_plain_think_block(raw_content)
+            if not think_content: # Try XML if plain think block not found
+                processed_content, think_content = extract_xml_think_block(raw_content)
+            
+            st.markdown(processed_content) # Display the processed content (without think logs here)
+
+            if think_content:
+                with st.expander("🤔 Thinking logs"):
+                    st.markdown(think_content) # Display think logs in an expander
+        # --- END MODIFICATION ---
+
         st.divider()
         st.subheader("Download Source")
         col1, col2, col3 = st.columns(3)
@@ -219,6 +289,13 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key=f"download_docx_src_{source.id}"
             )
+            st.download_button(
+                label="Download PDF",
+                data=source_to_pdf_bytes(source),
+                file_name=f"{safe_title}.pdf",
+                mime="application/pdf",
+                key=f"download_pdf_src_{source.id}"
+            )
         with col2:
             st.download_button(
                 label="Download MD",
@@ -226,13 +303,6 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
                 file_name=f"{safe_title}.md",
                 mime="text/markdown",
                 key=f"download_md_src_{source.id}"
-            )
-            st.download_button(
-                label="Download PDF",
-                data=source_to_pdf_bytes(source),
-                file_name=f"{safe_title}.pdf",
-                mime="application/pdf",
-                key=f"download_pdf_src_{source.id}"
             )
         with col3:
             st.download_button(
@@ -242,3 +312,7 @@ def source_panel(source_id: str, notebook_id=None, modal=False):
                 mime="application/json",
                 key=f"download_json_src_{source.id}"
             )
+
+        if st.button("Delete Source", key=f"delete_source_{source.id}"):
+            source.delete()
+            st.rerun()

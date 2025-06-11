@@ -28,7 +28,8 @@ dependencies = [
     "pymupdf==1.24.11",
     "python-magic>=0.4.27",
     "langdetect>=1.0.9",
-    "youtube-transcript-api>=0.6.2",
+    "youtube-transcript-api~=0.6.3",
+    "streamlit-antd-components~=0.3.2",
     "openai>=1.52.0",
     "pre-commit>=4.0.1",
     "langchain-community>=0.3.3",
@@ -67,6 +68,13 @@ dependencies = [
     "weasyprint>=65.1",
     "streamlit-agraph>=0.0.45",
     "langchain-unstructured>=0.1.6",
+    "docling>=2.15.1",
+    "langchain-docling>=0.0.1",
+    "mlx-vlm>=0.1.26",
+    "reportlab>=4.2.0",
+    "pandas>=2.2.0",
+    "unstructured[epub]>=0.17.2",
+    "pandoc>=2.4",
 ]
 
 [tool.setuptools]

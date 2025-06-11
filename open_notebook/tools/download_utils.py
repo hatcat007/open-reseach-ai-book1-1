@@ -9,7 +9,6 @@ from docx.shared import Inches
 
 # For PDF (Markdown -> HTML -> PDF)
 import markdown # For converting Markdown to HTML
-from weasyprint import HTML # For converting HTML to PDF
 
 def note_to_txt(note: Note) -> str:
     """Converts a Note object to a plain text string."""
@@ -49,6 +48,7 @@ def note_to_docx_bytes(note: Note) -> bytes:
 
 def note_to_pdf_bytes(note: Note) -> bytes:
     """Converts a Note object to PDF bytes."""
+    from weasyprint import HTML # For converting HTML to PDF
     html_content = markdown.markdown(note.content or '')
     # Basic styling
     html_string = f"""
@@ -137,6 +137,7 @@ def source_to_docx_bytes(source: Source) -> bytes:
 
 def source_to_pdf_bytes(source: Source) -> bytes:
     """Converts a Source object to PDF bytes."""
+    from weasyprint import HTML # For converting HTML to PDF
     # Consolidate content for PDF, similar to source_to_md but without the top-level title
     pdf_main_content = source.full_text or ""
     if not pdf_main_content and source.insights:
@@ -212,6 +213,7 @@ def transformation_to_docx_bytes(title: str, content: str) -> bytes:
 
 def transformation_to_pdf_bytes(title: str, content: str) -> bytes:
     """Converts transformation result to PDF bytes."""
+    from weasyprint import HTML # For converting HTML to PDF
     html_content = markdown.markdown(content or '')
     html_string = f"""
     <html>

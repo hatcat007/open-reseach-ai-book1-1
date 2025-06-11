@@ -1,5 +1,6 @@
 import re
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+import xml.etree.ElementTree # Import for ParseError
 
 def get_youtube_transcript(video_url: str) -> str:
     """
@@ -13,17 +14,21 @@ def get_youtube_transcript(video_url: str) -> str:
     """
     video_id = None
     # Standard URL: https://www.youtube.com/watch?v=VIDEO_ID
-    match = re.search(r"watch\?v=([^&]+)", video_url)
-    if match:
-        video_id = match.group(1)
-    else:
-        # Shortened URL: https://youtu.be/VIDEO_ID
-        match = re.search(r"youtu\.be/([^&?]+)", video_url)
+    # Shortened URL: https://youtu.be/VIDEO_ID
+    # Live URL: https://www.youtube.com/live/VIDEO_ID
+    patterns = [
+        r"watch\?v=([^&]+)",
+        r"youtu\.be/([^&?]+)",
+        r"/live/([^&?/]+)" # Corrected and simplified live pattern
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, video_url)
         if match:
             video_id = match.group(1)
+            break
 
     if not video_id:
-        return "Error: Could not extract video ID from the URL. Please provide a valid YouTube video URL (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ or https://youtu.be/dQw4w9WgXcQ)."
+        return "Error: Could not extract video ID from the URL. Please provide a valid YouTube video URL (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ, https://youtu.be/dQw4w9WgXcQ, or https://www.youtube.com/live/VIDEO_ID)."
 
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
@@ -68,13 +73,15 @@ def get_youtube_transcript(video_url: str) -> str:
             return f"Error: No suitable transcript (manual or generated, preferring English) found for video ID: {video_id}."
 
         # logger.info(f"Fetching transcript for {video_id} using language: {selected_transcript_to_fetch.language}, generated: {selected_transcript_to_fetch.is_generated}")
-        full_transcript = "\n".join([item['text'] for item in selected_transcript_to_fetch.fetch()])
+        full_transcript = "\\n".join([item['text'] for item in selected_transcript_to_fetch.fetch()])
         return full_transcript
     except TranscriptsDisabled:
         return f"Error: Transcripts are disabled for video ID: {video_id}"
     except NoTranscriptFound:
         return f"Error: No transcript found for video ID: {video_id}. This might be because the video is live, has no captions, or they are not available in a processable format."
     except Exception as e:
+        if isinstance(e, xml.etree.ElementTree.ParseError) and "no element found" in str(e).lower():
+            return f"Error: Failed to parse transcript data from YouTube for video ID {video_id}. This can happen with some live or recently ended videos. The library might need an update."
         return f"Error: An unexpected error occurred while fetching transcript for video ID {video_id}: {str(e)}"
 
 if __name__ == '__main__':
