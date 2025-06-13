@@ -80,7 +80,11 @@ def route_save_item_or_trigger_transformations_node_action(state: SourceState) -
 
     if index < len(all_staged_content):
         current_content_item = all_staged_content[index]
-        if current_content_item:
+        # Check if the item has an error. If so, skip it.
+        if current_content_item and current_content_item.get("error"):
+            logger.warning(f"RouterNode: Skipping item at index {index} due to processing error: {current_content_item.get('error')}")
+            decision_str = "do_skip_item"
+        elif current_content_item:
             logger.info(f"RouterNode: Preparing item {index + 1}/{len(all_staged_content)} (index {index}) for save_source.")
             item_payload = {"content_state": current_content_item, "_current_processing_index_for_debug": index}
             decision_str = "do_save_item"

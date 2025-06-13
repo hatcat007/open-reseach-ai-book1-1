@@ -28,7 +28,7 @@ dependencies = [
     "pymupdf==1.24.11",
     "python-magic>=0.4.27",
     "langdetect>=1.0.9",
-    "youtube-transcript-api~=0.6.3",
+    "youtube-transcript-api",
     "streamlit-antd-components~=0.3.2",
     "openai>=1.52.0",
     "pre-commit>=4.0.1",

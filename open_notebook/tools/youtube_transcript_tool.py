@@ -1,6 +1,7 @@
 import re
+from loguru import logger
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
-import xml.etree.ElementTree # Import for ParseError
+import xml.etree.ElementTree as ET # Import for ParseError
 
 def get_youtube_transcript(video_url: str) -> str:
     """
@@ -28,9 +29,11 @@ def get_youtube_transcript(video_url: str) -> str:
             break
 
     if not video_id:
+        logger.warning(f"Could not extract video ID from URL: {video_url}")
         return "Error: Could not extract video ID from the URL. Please provide a valid YouTube video URL (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ, https://youtu.be/dQw4w9WgXcQ, or https://www.youtube.com/live/VIDEO_ID)."
 
     try:
+        logger.info(f"Fetching transcripts for video_id: {video_id}")
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         
         selected_transcript_to_fetch = None
@@ -66,22 +69,41 @@ def get_youtube_transcript(video_url: str) -> str:
         
         if not selected_transcript_to_fetch:
             # Construct a list of available transcript languages and types for debugging
-            # available_transcripts_info = []
-            # for t in transcript_list: # Iterate directly
-            #     available_transcripts_info.append((t.language, t.is_generated))
-            # logger.warning(f"No suitable transcript found after checking all types for video ID: {video_id}. Available: {available_transcripts_info}")
+            available_transcripts_info = []
+            for t in transcript_list: # Iterate directly
+                available_transcripts_info.append(f"lang={t.language}, generated={t.is_generated}")
+            logger.warning(f"No suitable transcript found for video ID: {video_id}. Available transcripts: [{'; '.join(available_transcripts_info)}]")
             return f"Error: No suitable transcript (manual or generated, preferring English) found for video ID: {video_id}."
 
-        # logger.info(f"Fetching transcript for {video_id} using language: {selected_transcript_to_fetch.language}, generated: {selected_transcript_to_fetch.is_generated}")
-        full_transcript = "\\n".join([item['text'] for item in selected_transcript_to_fetch.fetch()])
-        return full_transcript
+        logger.info(f"Fetching transcript for {video_id} using language: {selected_transcript_to_fetch.language}, generated: {selected_transcript_to_fetch.is_generated}")
+        try:
+            full_transcript = "\\n".join([item['text'] for item in selected_transcript_to_fetch.fetch()])
+            return full_transcript
+        except ET.ParseError as e:
+            logger.warning(f"XML ParseError for preferred transcript (lang={selected_transcript_to_fetch.language}, gen={selected_transcript_to_fetch.is_generated}) for video ID {video_id}. Checking for fallbacks.")
+            # Fallback: try any other transcript if the selected one fails to parse
+            for fallback_transcript in transcript_list:
+                if fallback_transcript != selected_transcript_to_fetch:
+                    try:
+                        logger.info(f"Attempting fallback transcript (lang={fallback_transcript.language}, gen={fallback_transcript.is_generated}) for video ID {video_id}")
+                        full_transcript = "\\n".join([item['text'] for item in fallback_transcript.fetch()])
+                        return full_transcript
+                    except Exception as fallback_e:
+                        logger.warning(f"Fallback transcript failed for video ID {video_id}. Error: {fallback_e}")
+                        continue # Try next available transcript
+            
+            # If all fallbacks fail, then return the original parse error message
+            logger.error(f"All fallback transcripts also failed for video ID {video_id}.")
+            return f"Error: Failed to parse transcript data from YouTube for video ID {video_id}. The data received was empty or malformed. This can happen with auto-generated captions."
+
     except TranscriptsDisabled:
+        logger.warning(f"Transcripts are disabled for video ID: {video_id}")
         return f"Error: Transcripts are disabled for video ID: {video_id}"
     except NoTranscriptFound:
+        logger.warning(f"No transcript found for video ID: {video_id}")
         return f"Error: No transcript found for video ID: {video_id}. This might be because the video is live, has no captions, or they are not available in a processable format."
     except Exception as e:
-        if isinstance(e, xml.etree.ElementTree.ParseError) and "no element found" in str(e).lower():
-            return f"Error: Failed to parse transcript data from YouTube for video ID {video_id}. This can happen with some live or recently ended videos. The library might need an update."
+        logger.exception(f"An unexpected error occurred while fetching transcript for video ID {video_id}")
         return f"Error: An unexpected error occurred while fetching transcript for video ID {video_id}: {str(e)}"
 
 if __name__ == '__main__':
